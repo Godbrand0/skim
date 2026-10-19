@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Mezo Float docs</title>
+    <meta name="description" content="How Mezo Float works, how to use it, and how to run and operate it." />
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/docs.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="shell top-in">
+        <a class="brand" href="/">
+          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 14c4-6 8-6 12 0s8 6 16-1v9c-8 7-12 7-16 1s-8-6-12 0z" /></svg>
+          Mezo Float
+        </a>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/docs.html" aria-current="page">Docs</a>
+          <a class="button-link" href="/">Open the bridge</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="shell docs">
+      <aside class="toc" aria-label="On this page">
+        <details id="toc-details" open>
+          <summary>On this page</summary>
+          <ul id="toc-list">
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#how-it-works">How it works</a></li>
+            <li><a href="#using-the-bridge">Using the bridge</a></li>
+            <li><a href="#fees-and-limits">Assets, fees and limits</a></li>
+            <li><a href="#trust-and-security">Trust and security</a></li>
+            <li><a href="#architecture">Architecture</a></li>
+            <li><a href="#contracts">Contracts</a></li>
+            <li><a href="#relayer">Relayer</a></li>
+            <li><a href="#api">API reference</a></li>
+            <li><a href="#operations">Operations</a></li>
+            <li><a href="#run-it-yourself">Run it yourself</a></li>
+            <li><a href="#faq">FAQ</a></li>
+            <li><a href="#resources">Resources</a></li>
+          </ul>
+        </details>
+      </aside>
+
+      <article class="doc">
+        <h1>Mezo Float documentation</h1>
+        <p class="lead">Withdraw small amounts of MUSD, mUSDC or sats from Mezo as USDC on Base, even when they are below Mezo's own withdrawal minimum.</p>
+
+        <section id="overview">
+          <h2>Overview</h2>
+          <p>Mezo's native bridge has a high minimum for dollar tokens and a fixed fee, so a balance of a few dollars cannot leave Mezo at all. Mezo Float fixes this with a pre-funded pool of USDC on Base, called the float. You send your tokens on Mezo, and the float pays you USDC on Base within a minute or two. Later, the operator moves the collected tokens out of Mezo in one large batch and refills the float. The fixed costs of the native bridge are paid once per batch instead of once per user.</p>
+
+          <div class="facts">
+            <dl>
+              <div><dt>Route</dt><dd>Mezo to Base</dd></div>
+              <div><dt>You send</dt><dd>mUSDC, MUSD or BTC (counted in sats)</dd></div>
+              <div><dt>You receive</dt><dd>USDC on Base, native Circle USDC</dd></div>
+              <div><dt>Fee</dt><dd id="fact-fee">2%, at least $0.05</dd></div>
+              <div><dt>Speed</dt><dd>Usually within a minute or two</dd></div>
+              <div><dt>Network fees</dt><dd>You pay Mezo gas in BTC (a fraction of a cent). Base gas is covered.</dd></div>
+            </dl>
+          </div>
+
+          <h3>What it is not</h3>
+          <ul>
+            <li>It is not Mezo's official bridge and is not operated by Mezo.</li>
+            <li>It is a beta. The contracts have not been audited, and per-transfer and daily limits apply.</li>
+            <li>It is not trustless. Your payout depends on the operator's relayer and float (see <a href="#trust-and-security">Trust and security</a>).</li>
+          </ul>
+        </section>
+
+        <section id="how-it-works">
+          <h2>How it works</h2>
+          <ol class="sequence">
+            <li><strong>You deposit on Mezo.</strong> You call the deposit contract with your token (or BTC) and the Base address that should receive USDC. The contract forwards your funds to the operator's treasury in the same transaction and emits a <code>Deposit</code> event with a unique id. It never holds your funds.</li>
+            <li><strong>The relayer waits for confirmation.</strong> A service watches Mezo for deposit events and waits for a few blocks (5 by default) before acting.</li>
+            <li><strong>The relayer prices the deposit.</strong> It converts your amount to USD, subtracts the fee, and checks the payout against the float's limits and balance.</li>
+            <li><strong>The float pays you.</strong> The relayer calls <code>release</code> on the float contract on Base, using the deposit id as a single-use reference. USDC arrives at your address.</li>
+            <li><strong>The operator rebalances later.</strong> Collected tokens are swapped to mUSDC on Mezo, withdrawn through Mezo's native bridge to Ethereum, moved to Base with Circle's CCTP, and sent to the float. This batch step is done by the operator and is not part of your transfer.</li>
+          </ol>
+
+<pre class="diagram" aria-label="Flow diagram"><code>You (Mezo)                         Mezo Float                            Base
+  |  deposit(token, amount, recipient)   |
+  |------------------------------------->|  funds forwarded to treasury
+  |                                      |  Deposit(id, ...) event
+  |                       relayer watches, waits for confirmations, prices it
+  |                                      |
+  |                                      |---- release(recipient, payout, id) ---->  float pays USDC
+  |                                      |
+  later, in batches (operator):  treasury -> mUSDC -> Mezo bridge to Ethereum -> CCTP -> float</code></pre>
+        </section>
+
+        <section id="using-the-bridge">
+          <h2>Using the bridge</h2>
+          <ol class="sequence">
+            <li><strong>Connect your wallet.</strong> Any browser wallet that supports custom networks works. If you are on another network, the button changes to <em>Switch to Mezo</em> and adds the network for you if needed (chain ID 31612, gas token BTC).</li>
+            <li><strong>Pick the token you send.</strong> The dropdown lists mUSDC, MUSD and BTC with your balances. For BTC you enter whole sats.</li>
+            <li><strong>Enter an amount.</strong> <em>Max</em> fills your balance, capped at the per-transfer maximum. When you send BTC it leaves a small reserve so you can still pay network fees. The panel on the right shows what you receive, estimated.</li>
+            <li><strong>Check the Base address.</strong> It defaults to your wallet. Use an address you control on Base. Transfers cannot be undone.</li>
+            <li><strong>Approve, then bridge.</strong> For mUSDC and MUSD the first button is <em>Approve</em>, which allows the deposit contract to take exactly the amount you entered, never more. Then press <em>Bridge to Base</em>. BTC needs no approval.</li>
+            <li><strong>Follow the progress.</strong> The tracker shows <em>Sent on Mezo</em>, <em>Confirming on Mezo</em> and <em>USDC sent on Base</em>, with links to both explorers.</li>
+          </ol>
+
+          <h3>Transfer states</h3>
+          <table>
+            <thead><tr><th>State</th><th>Meaning</th><th>What to do</th></tr></thead>
+            <tbody>
+              <tr><td>Confirming</td><td>Your deposit is on Mezo and the relayer is waiting for enough blocks.</td><td>Wait. This takes a short while.</td></tr>
+              <tr><td>Waiting</td><td>The deposit is valid but cannot be paid yet: the float is low, payouts are paused, a daily limit was reached, or the BTC price is unavailable.</td><td>Nothing. It resolves automatically when the cause clears. The note under the tracker names it.</td></tr>
+              <tr><td>USDC sent</td><td>The float released USDC to your address.</td><td>Done. The tracker links to the Base transaction.</td></tr>
+              <tr><td>Needs manual review</td><td>The deposit cannot be paid automatically, for example the payout would be below $0.50 after fees or above the per-transfer limit. Your funds are with the treasury.</td><td>Contact the operator with your Mezo transaction link for a manual payout or refund.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Before you send</h3>
+          <ul>
+            <li>You need a little BTC on Mezo for gas. A deposit costs roughly 0.0000002 BTC, a fraction of a cent. The balance bar warns you when your BTC is very low.</li>
+            <li>The amount shown is an estimate. The relayer sets the final amount when your deposit confirms, using the price at that moment.</li>
+            <li>Sending to the wrong Base address cannot be fixed.</li>
+          </ul>
+        </section>
+
+        <section id="fees-and-limits">
+          <h2>Assets, fees and limits</h2>
+          <p>The values below are read live from the service. They can change as the operator tunes the system.</p>
+
+          <div class="live" id="live-box" aria-live="polite">
+            <p class="muted" id="live-status">Loading live values…</p>
+            <table id="live-assets" hidden>
+              <thead><tr><th>You send</th><th>Minimum</th><th>Maximum</th><th>Status</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <dl class="kv" id="live-kv" hidden></dl>
+          </div>
+
+          <h3>How each asset is valued</h3>
+          <table>
+            <thead><tr><th>Asset</th><th>Value in USD</th><th>Why</th></tr></thead>
+            <tbody>
+              <tr><td>mUSDC</td><td>$1.00 per token</td><td>Mezo's representation of Circle USDC.</td></tr>
+              <tr><td>MUSD</td><td>$0.99 per token by default</td><td>MUSD trades slightly below $1 and can only be redeemed for BTC collateral, not for USD, so the operator prices in a haircut.</td></tr>
+              <tr><td>BTC (sats)</td><td>Mezo's BTC/USD oracle price, minus 0.5%</td><td>Covers price movement between your payout and the operator converting the BTC.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>The fee</h3>
+          <p>The fee is a percentage of the value, with a floor so tiny transfers still cover their cost:</p>
+<pre><code>fee = max(floor, value x 2%)            default: 2%, floor $0.05
+fee += value x 1%   while the float is below 30% of its target   (low-liquidity surcharge)
+you receive = value - fee</code></pre>
+          <p>It covers the operator's cost of moving collected funds out of Mezo in batches (a fixed fee on Mezo's bridge, swaps, and a CCTP hop), the peg and price risk the operator carries, and a small margin.</p>
+
+          <h3>Worked examples</h3>
+          <table>
+            <thead><tr><th>You send</th><th>Value</th><th>Fee</th><th>You receive</th></tr></thead>
+            <tbody>
+              <tr><td>10 mUSDC</td><td>$10.00</td><td>$0.20</td><td>$9.80</td></tr>
+              <tr><td>5 MUSD</td><td>$4.95 (at $0.99)</td><td>$0.099</td><td>$4.851</td></tr>
+              <tr><td>10,000 sats at a $83,000 oracle price</td><td>$8.2585 (after the 0.5% haircut)</td><td>$0.16517</td><td>$8.09333</td></tr>
+              <tr><td>1 mUSDC</td><td>$1.00</td><td>$0.05 (the floor)</td><td>$0.95</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Why the limits exist</h3>
+          <p>Each deposit has a minimum and maximum enforced by the deposit contract, and the float has three payout caps enforced by the float contract: a maximum per transfer, a maximum per recipient per UTC day, and a maximum for all payouts per UTC day. They keep any single mistake or compromised key small. The defaults at launch are $25 per transfer, $50 per recipient per day and $300 per day, but the operator can raise or lower them.</p>
+        </section>
+
+        <section id="trust-and-security">
+          <h2>Trust and security</h2>
+          <p>Mezo Float is a custodial, relayer-based service. It is designed to keep the operator's mistakes and key compromises small, but it does not remove the need to trust the operator.</p>
+
+          <h3>What you trust the operator for</h3>
+          <ul>
+            <li>Your deposit goes to the operator's treasury immediately. Nothing on-chain forces the payout to happen. The relayer is expected to pay you.</li>
+            <li>The relayer decides the exact amount you receive, using the rules above.</li>
+            <li>Deposits that cannot be paid automatically are held for manual payout or refund.</li>
+          </ul>
+
+          <h3>What the contracts enforce</h3>
+          <ul>
+            <li><strong>No double pay.</strong> Each deposit id can be paid once. A second release with the same id reverts.</li>
+            <li><strong>Hard caps.</strong> The float cannot pay more than its per-transfer, per-recipient and daily limits, even if the relayer key is stolen.</li>
+            <li><strong>Narrow roles.</strong> The relayer key can only call <code>release</code>. The guardian can only pause. Only the admin can change limits, unpause or withdraw the float.</li>
+            <li><strong>Pause.</strong> Payouts and new deposits can be stopped immediately. The admin can still withdraw the float while paused.</li>
+            <li><strong>Delayed admin handover.</strong> Transferring the admin role is two-step with a delay, so a mistake or hijack can be noticed.</li>
+            <li><strong>Deposit contract holds nothing.</strong> It forwards funds to the treasury in the same transaction and rejects fee-on-transfer tokens.</li>
+          </ul>
+
+          <h3>Roles</h3>
+          <table>
+            <thead><tr><th>Role</th><th>Can</th><th>Cannot</th></tr></thead>
+            <tbody>
+              <tr><td>Admin (multisig recommended)</td><td>Set limits, unpause, withdraw the float, configure tokens and treasury, grant and revoke roles</td><td>Change roles instantly: the handover is two-step with a delay</td></tr>
+              <tr><td>Relayer (hot key)</td><td><code>release</code> within the caps</td><td>Withdraw, change limits, pause or unpause</td></tr>
+              <tr><td>Guardian</td><td>Pause payouts or deposits</td><td>Unpause, release, withdraw</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Known risks</h3>
+          <ul>
+            <li><strong>Unaudited code.</strong> The contracts have tests and a full local end-to-end test, but no external audit yet. Use small amounts.</li>
+            <li><strong>Liquidity.</strong> If the float runs out, payouts wait until it is refilled.</li>
+            <li><strong>Mezo's native bridge.</strong> Refills depend on it. A previous vulnerability in its bridge-out path led to a pause while it was fixed, and a pause would delay refills but not stop payouts from the float.</li>
+            <li><strong>Price and peg.</strong> BTC and MUSD prices can move between your payout and the operator's conversion. The haircuts and fee absorb normal moves, not extreme ones.</li>
+            <li><strong>Operational.</strong> A stopped relayer delays payouts. A wrong Base address cannot be recovered.</li>
+          </ul>
+        </section>
+
+        <section id="architecture">
+          <h2>Architecture</h2>
+          <table>
+            <thead><tr><th>Part</th><th>Where</th><th>Job</th></tr></thead>
+            <tbody>
+              <tr><td>MezoDeposit</td><td>Mezo (chain 31612)</td><td>Accepts mUSDC, MUSD or BTC, forwards to the treasury, emits <code>Deposit</code></td></tr>
+              <tr><td>MezoFloat</td><td>Base (chain 8453)</td><td>Holds USDC and pays out through <code>release</code>, within limits</td></tr>
+              <tr><td>Relayer</td><td>Operator's server</td><td>Watches deposits, prices them, calls <code>release</code>, serves the API</td></tr>
+              <tr><td>Treasury</td><td>Mezo, operator-controlled</td><td>Receives all deposits and funds the rebalancing batches</td></tr>
+              <tr><td>Rebalancer</td><td>Operator, semi-manual</td><td>Converts the treasury to USDC on Base and refills the float</td></tr>
+              <tr><td>Frontend</td><td>Static site</td><td>This app and these docs</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Deposit lifecycle in the relayer</h3>
+          <table>
+            <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><code>new</code></td><td>Seen on Mezo after enough confirmations, not processed yet</td></tr>
+              <tr><td><code>waiting</code></td><td>Valid but blocked for now (float low or paused, daily limit, BTC price unavailable, or a transient error). Retried every few seconds</td></tr>
+              <tr><td><code>sending</code></td><td>The release transaction has been submitted</td></tr>
+              <tr><td><code>paid</code></td><td>The release succeeded on Base</td></tr>
+              <tr><td><code>manual_review</code></td><td>Cannot be paid automatically: payout under $0.50 or above the per-transfer limit, unknown token, or invalid recipient</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Safety properties</h3>
+          <ul>
+            <li><strong>Idempotent payouts.</strong> Before every release the relayer checks <code>refUsed(id)</code> on Base, so a lost database or a restart cannot cause a second payment. Deposits left in <code>sending</code> after a crash are reconciled on startup.</li>
+            <li><strong>Simulate first.</strong> Every release is simulated before it is sent, and the relayer starts with payouts disabled.</li>
+            <li><strong>Startup checks.</strong> The relayer refuses to start if the RPCs are on the wrong chain, a contract address has no code, or its key does not hold the relayer role.</li>
+          </ul>
+
+          <h3>Rebalancing path</h3>
+          <p>Mezo's native bridge can only withdraw to Ethereum or Bitcoin, not to Base, and requires at least 20 mUSDC per withdrawal with a flat fee of about $3. So each batch is:</p>
+<pre><code>BTC  --(BTC/MUSD pool)-->  MUSD  --(MUSD/mUSDC pool)-->  mUSDC
+mUSDC --(Mezo native bridge, min 20)--> USDC on Ethereum
+USDC on Ethereum --(Circle CCTP)--> USDC on Base --> float</code></pre>
+        </section>
+
+        <section id="contracts">
+          <h2>Contracts</h2>
+          <p>Both contracts are small, use OpenZeppelin 5 (<code>AccessControlDefaultAdminRules</code>, <code>Pausable</code>, <code>ReentrancyGuard</code>, <code>SafeERC20</code>) and are written for Solidity 0.8.24.</p>
+
+          <h3>Addresses</h3>
+          <table id="contract-table">
+            <thead><tr><th>Contract</th><th>Network</th><th>Address</th></tr></thead>
+            <tbody>
+              <tr><td>MezoDeposit</td><td>Mezo</td><td id="addr-deposit">Loading…</td></tr>
+              <tr><td>MezoFloat</td><td>Base</td><td id="addr-float">Loading…</td></tr>
+            </tbody>
+          </table>
+          <p>Tokens used (verified on-chain):</p>
+          <table>
+            <thead><tr><th>Token</th><th>Network</th><th>Address</th><th>Decimals</th></tr></thead>
+            <tbody>
+              <tr><td>MUSD</td><td>Mezo</td><td><a href="https://explorer.mezo.org/address/0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186" rel="noopener noreferrer">0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186</a></td><td>18</td></tr>
+              <tr><td>mUSDC</td><td>Mezo</td><td><a href="https://explorer.mezo.org/address/0x04671C72Aab5AC02A03c1098314b1BB6B560c197" rel="noopener noreferrer">0x04671C72Aab5AC02A03c1098314b1BB6B560c197</a></td><td>6</td></tr>
+              <tr><td>BTC (native gas token)</td><td>Mezo</td><td>Sent as value, no token address (the deposit contract uses the zero address as its key)</td><td>18</td></tr>
+              <tr><td>USDC</td><td>Base</td><td><a href="https://basescan.org/address/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" rel="noopener noreferrer">0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913</a></td><td>6</td></tr>
+            </tbody>
+          </table>
+
+          <h3>MezoDeposit (Mezo)</h3>
+          <table class="fn">
+            <thead><tr><th>Function</th><th>Who</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>deposit(token, amount, recipient)</code></td><td>Anyone</td><td>Pulls an enabled ERC-20 from the caller to the treasury and emits <code>Deposit</code>. Requires prior approval. Reverts if the token is disabled, the amount is outside the token's range, the recipient is zero, the contract is paused, or fewer tokens arrive than requested.</td></tr>
+              <tr><td><code>depositNative(recipient)</code></td><td>Anyone</td><td>Same for native BTC sent as <code>msg.value</code>. Forwards to the treasury and reverts if the treasury rejects it.</td></tr>
+              <tr><td><code>setTokenConfig(token, enabled, min, max)</code></td><td>Admin</td><td>Enables or disables a token and sets its per-deposit range, in the token's own units. Use the zero address for BTC.</td></tr>
+              <tr><td><code>setTreasury(address)</code></td><td>Admin</td><td>Changes where funds are forwarded. Cannot be zero or the contract itself.</td></tr>
+              <tr><td><code>pause()</code> / <code>unpause()</code></td><td>Guardian or admin / admin</td><td>Stops or resumes new deposits.</td></tr>
+              <tr><td><code>tokenConfig(token)</code>, <code>treasury()</code>, <code>nextNonce()</code></td><td>Anyone</td><td>Views.</td></tr>
+            </tbody>
+          </table>
+<pre><code>event Deposit(uint256 indexed nonce, bytes32 indexed id, address indexed sender,
+              address token, uint256 amount, address recipient);
+
+id = keccak256(abi.encode(block.chainid, address(this), nonce))</code></pre>
+
+          <h3>MezoFloat (Base)</h3>
+          <table class="fn">
+            <thead><tr><th>Function</th><th>Who</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>release(recipient, amount, ref)</code></td><td>Relayer</td><td>Pays USDC to <code>recipient</code>. Reverts if paused, the amount is zero, the recipient is zero or the contract, the <code>ref</code> was already used, or a per-transfer, per-recipient or daily limit would be exceeded.</td></tr>
+              <tr><td><code>setLimits(perTx, perAddressPerDay, globalPerDay)</code></td><td>Admin</td><td>All must be non-zero and ordered <code>perTx &lt;= perAddressPerDay &lt;= globalPerDay</code>. USDC units (6 decimals).</td></tr>
+              <tr><td><code>withdraw(to, amount)</code></td><td>Admin</td><td>Takes USDC out of the float. Works while paused.</td></tr>
+              <tr><td><code>pause()</code> / <code>unpause()</code></td><td>Guardian or admin / admin</td><td>Stops or resumes payouts.</td></tr>
+              <tr><td><code>floatBalance()</code>, <code>refUsed(ref)</code>, <code>globalSpentToday()</code>, <code>addressSpentToday(a)</code>, <code>maxPerTx()</code>, <code>maxPerAddressPerDay()</code>, <code>maxGlobalPerDay()</code></td><td>Anyone</td><td>Views. Daily windows are UTC days.</td></tr>
+            </tbody>
+          </table>
+<pre><code>event Released(bytes32 indexed ref, address indexed recipient, uint256 amount);
+event LimitsUpdated(uint256 maxPerTx, uint256 maxPerAddressPerDay, uint256 maxGlobalPerDay);
+event Withdrawn(address indexed to, uint256 amount);</code></pre>
+          <p>Anyone can add liquidity by sending USDC straight to the float address. There is no deposit function.</p>
+        </section>
+
+        <section id="relayer">
+          <h2>Relayer</h2>
+          <p>The relayer is a TypeScript service for Node 24 using viem and the built-in SQLite. One process runs three loops: it ingests <code>Deposit</code> events, pays pending deposits, and serves the HTTP API.</p>
+          <ul>
+            <li><strong>Ingest.</strong> Reads <code>Deposit</code> logs from Mezo in chunks of 1,000 blocks, only up to <code>head - CONFIRMATIONS</code>, and stores each in SQLite keyed by deposit id.</li>
+            <li><strong>Price.</strong> mUSDC and MUSD use fixed values, BTC uses Mezo's own oracle at <code>0x7b7c000000000000000000000000000000000015</code>. A price older than one hour or not above zero is rejected, and the deposit waits.</li>
+            <li><strong>Pay.</strong> Checks the float state and limits, simulates, sends <code>release</code>, waits for the receipt and records the transaction.</li>
+            <li><strong>Payouts are off by default.</strong> The relayer only simulates until <code>ENABLE_PAYOUTS=true</code>.</li>
+          </ul>
+
+          <h3>Configuration</h3>
+          <table>
+            <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>MEZO_RPC_URL</code>, <code>BASE_RPC_URL</code></td><td>required</td><td>RPC endpoints. Use private ones in production.</td></tr>
+              <tr><td><code>FLOAT_ADDRESS</code>, <code>DEPOSIT_ADDRESS</code></td><td>required</td><td>Deployed contracts.</td></tr>
+              <tr><td><code>DEPOSIT_START_BLOCK</code></td><td>required</td><td>Block where the deposit contract was deployed.</td></tr>
+              <tr><td><code>ENABLE_PAYOUTS</code></td><td><code>false</code></td><td>Must be exactly <code>true</code> to send payouts.</td></tr>
+              <tr><td><code>RELAYER_PRIVATE_KEY</code></td><td>none</td><td>Hot key holding the relayer role. Use a secret manager.</td></tr>
+              <tr><td><code>CONFIRMATIONS</code></td><td>5</td><td>Mezo blocks to wait before acting.</td></tr>
+              <tr><td><code>FEE_BPS</code>, <code>FEE_FLOOR_MICRO</code></td><td>200, 50000</td><td>2% and $0.05 (USDC micro-units).</td></tr>
+              <tr><td><code>LOW_FLOAT_SURCHARGE_BPS</code></td><td>100</td><td>Extra 1% while the float is under 30% of target.</td></tr>
+              <tr><td><code>MUSD_VALUE_BPS</code>, <code>MUSDC_VALUE_BPS</code></td><td>9900, 10000</td><td>Value of each token in basis points of $1.</td></tr>
+              <tr><td><code>BTC_SPREAD_BPS</code></td><td>50</td><td>Haircut on the oracle BTC price.</td></tr>
+              <tr><td><code>MIN_PAYOUT_MICRO</code></td><td>500000</td><td>Payouts under $0.50 go to manual review.</td></tr>
+              <tr><td><code>FLOAT_TARGET_MICRO</code></td><td>300000000</td><td>Float size used for the low-liquidity surcharge ($300).</td></tr>
+              <tr><td><code>PORT</code>, <code>CORS_ORIGIN</code>, <code>DB_PATH</code>, <code>POLL_MS</code></td><td>8787, localhost:5173, ./relayer.sqlite, 5000</td><td>Server and storage.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="api">
+          <h2>API reference</h2>
+          <p>Read-only JSON over HTTP, rate limited to 90 requests per minute per IP. CORS allows the single configured frontend origin. Amounts in responses are USD strings with six decimals.</p>
+
+          <h3>GET /api/config</h3>
+          <p>Contracts, assets with their limits, the fee model, current float liquidity and pause state.</p>
+<pre><code>{
+  "chains": { "mezo": 31612, "base": 8453 },
+  "contracts": { "deposit": "0x...", "float": "0x..." },
+  "assets": [
+    { "key": "musdc", "symbol": "mUSDC", "decimals": 6, "address": "0x04671C...", "unit": "mUSDC",
+      "enabled": true, "min": "1", "max": "25" },
+    { "key": "btc", "symbol": "BTC", "decimals": 18, "unit": "sats", "min": "1000", "max": "30000", "...": "..." }
+  ],
+  "fee": { "percent": 2, "floorUsdc": "0.050000" },
+  "floatAvailableUsdc": "277.255670",
+  "maxPayoutUsdc": "25.000000",
+  "paused": false,
+  "btcUsd": "83727.2"
+}</code></pre>
+
+          <h3>GET /api/quote?asset=&amount=</h3>
+          <p><code>asset</code> is <code>musdc</code>, <code>musd</code> or <code>btc</code>. <code>amount</code> is a decimal in token units, or whole sats for <code>btc</code>.</p>
+<pre><code>GET /api/quote?asset=musdc&amp;amount=10
+
+{
+  "asset": "musdc",
+  "grossUsdc": "10.000000",
+  "feeUsdc": "0.200000",
+  "payoutUsdc": "9.800000",
+  "surchargeApplied": false,
+  "canFulfill": true,
+  "reasons": [],
+  "note": "Estimate. The final amount is set when your deposit is confirmed."
+}</code></pre>
+          <p>When <code>canFulfill</code> is false, <code>reasons</code> explains why (below the minimum, above the maximum, too small after fees, above the per-payout limit, payouts paused, or not enough liquidity). Invalid input returns <code>400</code> with <code>{ "error": "invalid amount" }</code>.</p>
+
+          <h3>GET /api/deposit/:txHash</h3>
+          <p>Status of the deposits in a Mezo transaction. <code>indexed</code> is false until the relayer has seen it.</p>
+<pre><code>{
+  "indexed": true,
+  "deposits": [{
+    "id": "0x...", "nonce": 12, "asset": "musdc", "amount": "10000000",
+    "recipient": "0x...", "status": "paid",
+    "payoutUsdc": "9.800000", "feeUsdc": "0.200000",
+    "releaseTx": "0x...", "note": null, "updatedAt": 1791875000000
+  }]
+}</code></pre>
+
+          <h3>GET /api/health</h3>
+          <p>Liveness for monitoring.</p>
+<pre><code>{ "ok": true, "payoutsEnabled": true, "floatUsdc": "277.255670", "floatPaused": false,
+  "mezoHead": "12494000", "lastProcessedBlock": "12493990", "lastIngestAt": 1791875957000,
+  "counts": { "paid": 3 } }</code></pre>
+        </section>
+
+        <section id="operations">
+          <h2>Operations</h2>
+          <p>These notes are for the operator.</p>
+
+          <h3>Daily check</h3>
+          <p>Run the monitor from the <code>relayer</code> folder. It prints the float, daily payout use, the 24-hour totals, the queue and the treasury value, and says when to rebalance.</p>
+<pre><code>cd relayer &amp;&amp; npm run monitor</code></pre>
+
+          <h3>Rebalancing a batch</h3>
+          <p>Run a batch when the treasury holds at least about $300, or when the float falls below about $90. Keep a batch to about $1,000 or less because the MUSD/mUSDC pool on Mezo is shallow.</p>
+          <ol class="sequence">
+            <li>On Mezo, swap BTC to MUSD and MUSD to mUSDC in the Mezo app. Keep a little BTC for gas.</li>
+            <li>Withdraw at least 20 mUSDC to an Ethereum wallet you control (Mezo app, destination Ethereum). The fee is about $3, and it takes roughly 30 to 60 minutes.</li>
+            <li>Move the USDC from Ethereum to Base with Circle's CCTP, with the float contract as the recipient.</li>
+            <li>Confirm the float balance rose, and record the batch (amounts, fees, gas).</li>
+          </ol>
+          <p>Mezo's withdrawal chains were Ethereum and Bitcoin only at build time. Re-check the minimum and the supported chains before each batch because they are governance-controlled.</p>
+
+          <h3>Emergency actions</h3>
+          <table>
+            <thead><tr><th>Situation</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td>Stop payouts</td><td>Guardian calls <code>pause()</code> on the float</td></tr>
+              <tr><td>Stop new deposits</td><td>Guardian calls <code>pause()</code> on the deposit contract</td></tr>
+              <tr><td>Relayer key leaked</td><td>Pause the float, revoke the relayer role, grant it to a new key, unpause</td></tr>
+              <tr><td>Float running out</td><td>Pause, or lower the limits, until it is refilled</td></tr>
+              <tr><td>Pull the float</td><td>Admin calls <code>withdraw(to, amount)</code> (works while paused)</td></tr>
+              <tr><td>MUSD depegs further</td><td>Raise the MUSD haircut, or disable MUSD with <code>setTokenConfig</code></td></tr>
+            </tbody>
+          </table>
+
+          <h3>What to watch</h3>
+          <ul>
+            <li>The relayer's ETH balance on Base.</li>
+            <li><code>lastIngestAt</code> in <code>/api/health</code>. If it stops moving, the Mezo RPC or the process is down.</li>
+            <li>Deposits in <code>waiting</code> for more than an hour, and any in <code>manual_review</code>.</li>
+            <li>The MUSD market price against the configured haircut.</li>
+          </ul>
+        </section>
+
+        <section id="run-it-yourself">
+          <h2>Run it yourself</h2>
+          <p>The repository contains the contracts (Foundry), the relayer, this frontend and the deploy scripts. Nothing broadcasts for you: you sign every transaction with your own wallets.</p>
+
+          <h3>Prerequisites</h3>
+          <ul>
+            <li>Foundry, Node 24 or newer.</li>
+            <li>An admin multisig, a relayer hot key, a guardian address and a Mezo treasury address. They must all be different.</li>
+            <li>A little ETH on Base for deployment and for the relayer's gas.</li>
+          </ul>
+
+          <h3>Verify first</h3>
+<pre><code>forge test                                                         # 33 contract tests
+BASE_RPC_URL=https://mainnet.base.org forge test --match-path "test/fork/*"
+BASE_RPC_URL=https://mainnet.base.org ./scripts/e2e-local.sh        # whole flow on local chains
+cd relayer &amp;&amp; npm install &amp;&amp; npm test &amp;&amp; npm run typecheck</code></pre>
+
+          <h3>Deploy</h3>
+<pre><code># Base: dry run, then broadcast with a keystore account
+export ADMIN=0x... RELAYER=0x... GUARDIAN=0x...
+forge script script/DeployFloat.s.sol --rpc-url https://mainnet.base.org
+forge script script/DeployFloat.s.sol --rpc-url https://mainnet.base.org --account deployer --broadcast
+
+# Mezo
+export ADMIN=0x... GUARDIAN=0x... TREASURY=0x...
+forge script script/DeployDeposit.s.sol --rpc-url $MEZO_RPC_URL
+forge script script/DeployDeposit.s.sol --rpc-url $MEZO_RPC_URL --account deployer --broadcast
+
+# then the admin enables the tokens
+DEPOSIT=0x... ./scripts/configure-deposit.sh calldata</code></pre>
+          <p>The deploy scripts refuse to run on the wrong chain and refuse duplicate role addresses. Start with a $50 to $100 float and the relayer in simulation mode, then enable payouts.</p>
+
+          <h3>Run the relayer and the frontend</h3>
+<pre><code>cd relayer  &amp;&amp; cp .env.example .env &amp;&amp; npm install &amp;&amp; npm start
+cd frontend &amp;&amp; cp .env.example .env &amp;&amp; npm install &amp;&amp; npm run build   # host frontend/dist over HTTPS</code></pre>
+          <p>The repository's <code>docs/DEPLOY.md</code> has the full checklist, and <code>docs/RUNBOOK.md</code> has the operations steps.</p>
+        </section>
+
+        <section id="faq">
+          <h2>FAQ</h2>
+
+          <h3>Why not just use Mezo's own withdrawal?</h3>
+          <p>It requires at least 20 mUSDC, charges a flat fee of about $3 and only goes to Ethereum. For a $5 balance the fee alone would eat most of it, and the minimum would block it entirely.</p>
+
+          <h3>Why a percentage fee?</h3>
+          <p>Each batch costs a fixed amount to move out of Mezo, and the operator carries price risk while holding collected funds. A percentage with a small floor spreads those costs across users in proportion to what they move.</p>
+
+          <h3>How long does it take?</h3>
+          <p>Usually under a minute (a measured transfer took 32 seconds): the relayer waits for 5 Mezo blocks, then sends one transaction on Base. If liquidity is low or payouts are paused, your transfer waits.</p>
+
+          <h3>My transfer says waiting. Is my money safe?</h3>
+          <p>Yes. Your deposit is recorded on Mezo and in the relayer. It is paid automatically when the cause clears, usually when the float is refilled. The note under the tracker says which cause applies.</p>
+
+          <h3>What happens if I send the wrong amount or token?</h3>
+          <p>The deposit contract rejects amounts outside the allowed range and tokens that are not enabled, and the transaction reverts so nothing is sent. Only the Base address is unrecoverable if you type the wrong one.</p>
+
+          <h3>Can I send more than the maximum?</h3>
+          <p>Not in one transfer. Split it into several. Per-recipient and daily limits also apply. Larger amounts are better served by Mezo's own bridge, which has lower proportional fees.</p>
+
+          <h3>Do I need BTC on Mezo?</h3>
+          <p>Yes, a very small amount, because Mezo gas is paid in BTC. A deposit costs a fraction of a cent.</p>
+
+          <h3>Is MUSD really worth less than mUSDC here?</h3>
+          <p>MUSD is valued at $0.99 by default because it trades slightly below a dollar and cannot be redeemed for dollars directly. If it moves, the operator adjusts the value.</p>
+
+          <h3>Is this audited?</h3>
+          <p>No. It has automated tests and an end-to-end test, but no independent audit. Treat it as a beta and use amounts you are comfortable with.</p>
+        </section>
+
+        <section id="resources">
+          <h2>Resources</h2>
+          <ul>
+            <li><a href="https://explorer.mezo.org" rel="noopener noreferrer">Mezo explorer</a></li>
+            <li><a href="https://basescan.org" rel="noopener noreferrer">Basescan</a></li>
+            <li><a href="https://mezo.org/docs/users/mainnet/bridges/" rel="noopener noreferrer">Mezo bridge documentation</a></li>
+            <li><a href="https://mezo.org/docs/users/resources/contracts-reference/" rel="noopener noreferrer">Mezo contract and token addresses</a></li>
+            <li><a href="https://developers.circle.com/cctp" rel="noopener noreferrer">Circle CCTP</a></li>
+          </ul>
+          <p class="hint">Mezo Float is an independent project and is not affiliated with Mezo or Circle.</p>
+        </section>
+      </article>
+    </div>
+
+    <script type="module" src="/src/docs.ts"></script>
+  </body>
+</html>

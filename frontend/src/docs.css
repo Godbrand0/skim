@@ -1,0 +1,70 @@
+/* docs page: reuses the tokens and shell from style.css */
+a.brand { color: inherit; text-decoration: none; }
+.docs { display: grid; grid-template-columns: 1fr; gap: 8px; padding-top: 12px; padding-bottom: 80px; }
+.toc details { border: 1px solid var(--line); border-radius: 14px; padding: 0 14px; background: var(--card); }
+.toc summary { cursor: pointer; padding: 12px 0; font-weight: 800; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.toc summary::-webkit-details-marker { display: none; }
+.toc summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg) translateY(-2px); }
+.toc details[open] summary::after { transform: rotate(225deg); }
+.toc ul { list-style: none; margin: 0; padding: 0 0 12px; }
+.toc li a { display: block; padding: 6px 10px; margin-left: -10px; border-radius: 8px; color: var(--muted); text-decoration: none; }
+.toc li a:hover { color: var(--text); }
+.toc li a[aria-current="true"] { color: var(--text); font-weight: 800; box-shadow: inset 3px 0 0 var(--mezo); }
+
+.doc { min-width: 0; max-width: 860px; }
+.doc h1 { font-size: clamp(1.9rem, 5vw, 2.8rem); line-height: 1.08; letter-spacing: -0.015em; margin: 18px 0 0; max-width: none; }
+.doc .lead { max-width: 60ch; font-size: 1.1rem; }
+.doc section { margin-top: 48px; scroll-margin-top: 16px; }
+.doc h2 { font-size: 1.6rem; letter-spacing: -0.01em; margin: 0 0 12px; padding-top: 20px; border-top: 1px solid var(--line); }
+.doc h3 { font-size: 1.1rem; margin: 28px 0 8px; }
+.doc p, .doc li { max-width: 72ch; }
+.doc ul, .doc ol { padding-left: 22px; }
+.doc li { margin: 6px 0; }
+.doc strong { font-weight: 800; }
+
+.doc code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; background: var(--panel); padding: 1px 4px; border-radius: 6px; overflow-wrap: break-word; }
+.doc pre { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; max-width: 100%; }
+.doc pre code { background: none; padding: 0; font-size: 0.85rem; line-height: 1.55; overflow-wrap: normal; white-space: pre; }
+
+.doc table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.93rem; }
+.doc th, .doc td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.doc th { font-weight: 800; border-bottom: 2px solid var(--text); white-space: nowrap; }
+.doc td:first-child { font-weight: 600; }
+.doc .fn td:first-child { width: 38%; }
+.doc .fn td:first-child code { font-weight: 600; }
+
+.sequence { list-style: none; counter-reset: seq; padding: 0; }
+.sequence > li { counter-increment: seq; position: relative; padding-left: 40px; margin: 14px 0; }
+.sequence > li::before { content: counter(seq); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; background: var(--button); color: var(--button-text); }
+
+.facts { margin: 18px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
+.facts dl { display: grid; grid-template-columns: 1fr; margin: 0; }
+.facts dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.facts dl > div:last-child { border-bottom: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 700; text-align: right; }
+
+.live { border: 1px solid var(--line); border-radius: 16px; padding: 12px 16px; background: var(--card); margin: 14px 0; }
+.live table { margin: 4px 0 12px; }
+.kv { display: grid; grid-template-columns: 1fr; margin: 0; }
+.kv > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-top: 1px solid var(--line); }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+
+.diagram { font-size: 0.8rem; }
+
+@media (min-width: 960px) {
+  .docs { grid-template-columns: 250px minmax(0, 1fr); gap: 56px; }
+  .toc { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow: auto; }
+  .toc details { border: 0; background: none; padding: 0; }
+  .toc summary { cursor: default; pointer-events: none; padding-top: 4px; }
+  .toc summary::after { display: none; }
+}
+@media (max-width: 560px) {
+  .facts dl > div { flex-direction: column; gap: 2px; }
+  .facts dd { text-align: left; }
+}
+@media (max-width: 700px) {
+  .doc table { display: block; overflow-x: auto; }
+  .doc th { white-space: normal; }
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Mezo Float</title>
+    <meta name="description" content="Withdraw small amounts of MUSD, mUSDC or sats from Mezo as USDC on Base." />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="shell top-in">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 14c4-6 8-6 12 0s8 6 16-1v9c-8 7-12 7-16 1s-8-6-12 0z" /></svg>
+          Mezo Float
+        </div>
+        <div class="top-actions">
+          <a href="/docs.html">Docs</a>
+          <button id="connect" class="ghost" type="button">Connect wallet</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="balances" aria-labelledby="bal-title">
+      <div class="shell">
+        <h2 id="bal-title" class="sr-only">Wallet balances</h2>
+        <dl class="bal-row">
+          <div><dt>mUSDC on Mezo</dt><dd id="b-musdc">-</dd></div>
+          <div><dt>MUSD on Mezo</dt><dd id="b-musd">-</dd></div>
+          <div><dt>BTC on Mezo</dt><dd id="b-btc">-</dd></div>
+          <div><dt>Gas balance in BTC</dt><dd id="b-gas">-</dd></div>
+          <div><dt id="b-base-label">USDC on Base</dt><dd id="b-base">-</dd></div>
+        </dl>
+        <p id="b-note" class="hint" role="status"></p>
+      </div>
+    </section>
+
+    <main class="shell main">
+      <section class="hero" aria-labelledby="title">
+        <h1 id="title">Withdraw small amounts from Mezo</h1>
+        <p class="lead">Below Mezo's own withdrawal minimum? Send it here and receive USDC on Base.</p>
+      </section>
+
+      <section class="card bridge" aria-label="Bridge">
+        <div class="route">
+          <div class="panel" id="from-panel">
+            <div class="panel-top">
+              <span class="chain"><i class="dot mezo"></i>From Mezo</span>
+              <span id="balance" class="muted"></span>
+            </div>
+            <div class="panel-row">
+              <input id="amount" class="big" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Amount to send" />
+              <div id="from-select" class="select"></div>
+            </div>
+            <div class="panel-bottom">
+              <span id="usd-est" class="muted">&nbsp;</span>
+              <button id="max" class="chip" type="button">Max</button>
+            </div>
+            <p id="limits" class="hint"></p>
+          </div>
+
+          <div class="link" aria-hidden="true">
+            <span class="rail"></span>
+            <span id="fee-line" class="fee-line"></span>
+          </div>
+
+          <div class="panel" id="to-panel">
+            <div class="panel-top">
+              <span class="chain"><i class="dot base"></i>To Base</span>
+              <span class="muted">You receive, estimated</span>
+            </div>
+            <div class="panel-row">
+              <output id="receive" class="big receive" for="amount from-select">0</output>
+              <div id="to-select" class="select"></div>
+            </div>
+            <div class="panel-bottom">
+              <span class="muted">We cover the Base network fee</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="foot">
+          <div class="field">
+            <div class="label-row">
+              <label for="recipient">Base address that receives the USDC</label>
+              <button id="use-wallet" class="linklike" type="button" hidden>Use my wallet</button>
+            </div>
+            <input id="recipient" autocomplete="off" spellcheck="false" placeholder="0x…" />
+            <p class="hint">Use an address you control on Base. Transfers can't be undone.</p>
+          </div>
+
+          <details class="details">
+            <summary>Route details <span id="sum-line" class="muted"></span></summary>
+            <dl class="quote" id="quote" aria-live="polite">
+              <div><dt>Value</dt><dd id="q-gross">-</dd></div>
+              <div><dt>Fee</dt><dd id="q-fee">-</dd></div>
+              <div class="total"><dt>You receive</dt><dd id="q-payout">-</dd></div>
+              <div><dt>Arrival</dt><dd>Usually within a minute or two</dd></div>
+              <div><dt>Liquidity on Base</dt><dd id="q-liquidity">-</dd></div>
+            </dl>
+          </details>
+        </div>
+
+        <p id="q-reason" class="problem" role="status"></p>
+        <button id="action" class="primary" type="button" disabled>Connect wallet</button>
+        <p id="msg" class="hint" role="status"></p>
+
+        <div class="flat tracker" id="tracker" hidden>
+          <h2 id="track-title">Your transfer</h2>
+          <ol class="steps" id="steps" aria-labelledby="track-title"></ol>
+          <p id="track-note" class="hint"></p>
+        </div>
+      </section>
+
+      <section class="flat info" aria-labelledby="how-title">
+        <h2 id="how-title">How it works</h2>
+        <ol>
+          <li>You send on Mezo. The funds go straight to the Mezo Float treasury.</li>
+          <li>When your transfer confirms, USDC is paid to your Base address from a pre-funded float, minus the fee.</li>
+          <li>The treasury settles with Mezo later in larger batches, which is how small amounts become possible.</li>
+        </ol>
+        <p class="hint">Beta. The contracts have not been audited, and per-transfer and daily limits apply. If liquidity runs out, your transfer waits until the float is refilled.</p>
+        <p class="hint" id="contracts"></p>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
