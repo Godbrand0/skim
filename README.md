@@ -1,6 +1,6 @@
 # Skim
 
-> Working name until the rename is finished: the app, docs and contract names still say "Mezo Float".
+> The app and its docs page now say Skim. The contracts keep their original names (`MezoFloat`, `MezoDeposit`) because those are the deployed names, and the runbooks in `docs/` still use the old name "Mezo Float" in places.
 
 A small-amount exit bridge for the Mezo ecosystem. It lets users withdraw sub-minimum amounts (about $1 to $19) of MUSD, mUSDC, or sats from Mezo as USDC on Base, instantly, by paying out of a pre-funded USDC float and refilling that float later in batches.
 
@@ -15,8 +15,10 @@ Status: **built and tested locally, not deployed.** Both contracts, the relayer 
 | Frontend | `frontend/` | bridge-style UI (From/To token dropdowns, route details, balances). Typechecks, builds, and was driven in headless Chrome with a mock wallet against real chain reads. Real wallet transactions not yet tested |
 | Local end-to-end test | `scripts/e2e-local.sh` | passes (all 3 assets, restart safety, dust rejection) |
 | Deploy scripts | `script/Deploy*.s.sol` | dry-run against live Base and Mezo succeeds |
+| Hosting | `render.yaml` and `docs/DEPLOY_RENDER.md` (free Render plan) | written and tested locally, including a wiped-database restart; not deployed yet |
 | Ops docs | `docs/PILOT.md` ($1 mainnet pilot), `docs/PILOT_RESULT.md` (pilot passed 19 Oct 2026), `docs/DEPLOY.md`, `docs/RUNBOOK.md` | written |
 | Mainnet pilot | contracts live on Base and Mezo with a $1 float | **passed**: 0.8 mUSDC in, 0.75 USDC out; see `docs/PILOT_RESULT.md` |
+| Reverse direction (USDC on Base to mUSDC on Mezo) | relayer lanes, deploy scripts, website switch, docs | built and passes the local end-to-end test; mainnet pilot steps in `docs/PILOT_ENTER.md` |
 | Public docs page | `frontend/docs.html` (served at `/docs.html`) | user guide, fees, trust model, contracts, API reference, operations, FAQ; live limits and addresses come from the relayer API |
 
 ---
@@ -227,6 +229,8 @@ The results set the batch size, fee model and fallback route.
 7. Launch on mainnet with a $50 to $100 float, then raise to $300 as the numbers hold.
 8. Add sats withdrawal once a price source is chosen.
 9. Later options: more destination chains, Lightning for sats, and an integration with Mezo's own tooling if it appears.
+10. **Roadmap, suggested by a Mezo developer lead:** let users bridge into **BTC for gas on Mezo** (for example USDC on Base to native BTC on Mezo, sold in small packs priced from Mezo's own oracle, from a small BTC float). Mezo gas is paid in BTC and native BTC bridge-in is closed, so a newcomer holding only stablecoins cannot transact. Bundling a small BTC top-up with the reverse direction would fix the arrival problem.
+11. **Roadmap:** a sats bridge-in (sats arriving on Mezo as part of the same gas and onboarding path). Not designed yet.
 
 ## 11. Development
 

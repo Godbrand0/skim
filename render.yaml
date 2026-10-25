@@ -1,0 +1,56 @@
+# Render Blueprint for Skim on the FREE plan. See docs/DEPLOY_RENDER.md.
+#
+# Free-plan limits that matter here: the relayer sleeps after 15 minutes without incoming requests, has no disk
+# (its database is wiped on every sleep, restart or redeploy), and Render may restart it at any time. Money stays
+# safe, because the chain is the source of truth, but deposits can be delayed. Good for a demo or a pilot.
+services:
+  - type: web
+    name: skim-relayer
+    runtime: node
+    plan: free
+    rootDir: relayer
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # chains and the live pilot contracts (all public)
+      - key: MEZO_RPC_URL
+        value: https://mainnet.mezo.public.validationcloud.io
+      - key: BASE_RPC_URL
+        value: https://mainnet.base.org
+      - key: DEPOSIT_ADDRESS
+        value: "0x7C7ad1bEa23Eea0189e94Ec42D20d3DA604DaDE6"
+      - key: DEPOSIT_START_BLOCK
+        value: "12613337"
+      - key: FLOAT_ADDRESS
+        value: "0x4891b3f06C3b9AA33C6DBFa45CacD3C5922Ef17A"
+      - key: TREASURY_ADDRESS
+        value: "0x25837EE4525C52BAf917e7DA84eDeE238D14F6c9"
+      - key: FLOAT_TARGET_MICRO
+        value: "1000000"
+      # behaviour on a free host
+      - key: TRUST_PROXY
+        value: "true"
+      - key: LOOKBACK_HOURS
+        value: "48"
+      # asked for once when the Blueprint is created, then left alone
+      - key: RELAYER_PRIVATE_KEY
+        sync: false
+      - key: ENABLE_PAYOUTS
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+
+  - type: web
+    name: skim-app
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: VITE_API_URL
+        sync: false

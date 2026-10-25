@@ -51,9 +51,10 @@ Contracts: [MezoFloat on Base](https://basescan.org/address/0x4891b3f06C3b9AA33C
 
 ## What's next for Skim
 
-- **The reverse direction (USDC on Base to mUSDC on Mezo).** The same two contracts work unchanged, deployed the other way round. Each direction's deposits refill the other's float on its own chain, so only the imbalance needs Mezo's bridge.
+- **The reverse direction (USDC on Base to mUSDC on Mezo)** is built and passes the end-to-end test on a Base fork: the same two contracts deployed the other way round, with the relayer and website handling both directions. A $1 mainnet pilot is next. Each direction's deposits refill the other's float on its own chain, so only the imbalance needs Mezo's bridge.
+- **BTC for gas and a sats bridge-in**, suggested by a Mezo developer lead. Mezo gas is paid in BTC and native BTC bridge-in is closed, so a newcomer holding only stablecoins can't transact. The plan is a small BTC float on Mezo that sells gas packs priced from Mezo's own oracle, bundled with the reverse direction.
 - **A real rebalancing run** through Mezo's bridge and CCTP, to set the fee and batch size from measured costs.
 - **A multisig admin, an external security review, and a legal check** before raising limits or the float.
-- **Turning on MUSD and sats**, plus a small BTC top-up for new arrivals, so someone with only stablecoins can transact on Mezo.
+- **Turning on MUSD and sats** in the live deployment.
 - **A depeg circuit-breaker** that pauses deposits if mUSDC drifts from $1.
 - **Closer ties to Mezo's onboarding paths,** such as Lolli's daily sats, and a conversation with the Mezo team about their planned small-amount bridge.
