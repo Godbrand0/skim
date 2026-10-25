@@ -4,7 +4,7 @@ import { base } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { floatAbi, oracleAbi } from "./abi.ts";
 import { MEZO_ORACLE } from "./config.ts";
-import type { Config } from "./config.ts";
+import type { ChainKey, Config } from "./config.ts";
 
 export const mezo = defineChain({
   id: 31612,
@@ -19,20 +19,26 @@ export const RELAYER_ROLE = keccak256(toBytes("RELAYER_ROLE"));
 export interface Clients {
   mezoClient: PublicClient;
   baseClient: PublicClient;
-  wallet?: WalletClient;
+  mezoWallet?: WalletClient;
+  baseWallet?: WalletClient;
   account?: Account;
 }
+
+export const clientFor = (c: Clients, k: ChainKey): PublicClient => (k === "mezo" ? c.mezoClient : c.baseClient);
+export const walletFor = (c: Clients, k: ChainKey): WalletClient | undefined => (k === "mezo" ? c.mezoWallet : c.baseWallet);
 
 export function makeClients(cfg: Config): Clients {
   const mezoClient = createPublicClient({ chain: mezo, transport: http(cfg.mezoRpc) });
   const baseClient = createPublicClient({ chain: base, transport: http(cfg.baseRpc) }) as unknown as PublicClient;
-  let wallet: WalletClient | undefined;
+  let mezoWallet: WalletClient | undefined;
+  let baseWallet: WalletClient | undefined;
   let account: Account | undefined;
   if (cfg.relayerKey) {
     account = privateKeyToAccount(cfg.relayerKey);
-    wallet = createWalletClient({ account, chain: base, transport: http(cfg.baseRpc) }) as unknown as WalletClient;
+    mezoWallet = createWalletClient({ account, chain: mezo, transport: http(cfg.mezoRpc) });
+    baseWallet = createWalletClient({ account, chain: base, transport: http(cfg.baseRpc) }) as unknown as WalletClient;
   }
-  return { mezoClient, baseClient, wallet, account };
+  return { mezoClient, baseClient, mezoWallet, baseWallet, account };
 }
 
 export interface FloatState {
@@ -44,9 +50,10 @@ export interface FloatState {
   globalSpentToday: bigint;
 }
 
-export async function readFloatState(c: Clients, floatAddress: Address): Promise<FloatState> {
+/** Reads a float contract's balance, pause flag and limits. `client` must be on the float's chain. */
+export async function readFloatState(client: PublicClient, floatAddress: Address): Promise<FloatState> {
   const read = <T extends "floatBalance" | "paused" | "maxPerTx" | "maxPerAddressPerDay" | "maxGlobalPerDay" | "globalSpentToday">(fn: T) =>
-    c.baseClient.readContract({ address: floatAddress, abi: floatAbi, functionName: fn });
+    client.readContract({ address: floatAddress, abi: floatAbi, functionName: fn });
   const [balanceMicro, paused, maxPerTx, maxPerAddress, maxGlobal, globalSpentToday] = await Promise.all([
     read("floatBalance"),
     read("paused"),

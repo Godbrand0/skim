@@ -14,6 +14,7 @@ import {
 const cfg: PricingConfig = {
   musdValueBps: 9900n,
   musdcValueBps: 10000n,
+  usdcValueBps: 10000n,
   btcSpreadBps: 50n,
   feeBps: 200n,
   feeFloorMicro: 50_000n,
@@ -86,4 +87,11 @@ test("parseDecimal accepts valid and rejects invalid input", () => {
 test("formatMicro", () => {
   assert.equal(formatMicro(9_800_000n), "9.800000");
   assert.equal(formatMicro(1n), "0.000001");
+});
+
+test("USDC deposited on Base is valued 1:1 and pays the same fee", () => {
+  const q = quote("usdc", 1_000_000n, undefined, FLOAT_OK, cfg);
+  assert.equal(q.grossMicro, 1_000_000n);
+  assert.equal(q.feeMicro, 50_000n); // 2% is $0.02, so the $0.05 floor applies
+  assert.equal(q.payoutMicro, 950_000n);
 });

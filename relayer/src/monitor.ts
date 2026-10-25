@@ -1,8 +1,8 @@
-// Prints float and treasury status and says whether it is time to run a rebalancing batch.
+// Prints float and treasury status for each lane and says whether it is time to rebalance.
 // Usage: node src/monitor.ts   (needs the same env as the relayer, except the private key)
 import { formatUnits } from "viem";
-import { loadConfig, MUSD, MUSDC } from "./config.ts";
-import { makeClients, readBtcUsd18, readFloatState } from "./chain.ts";
+import { loadConfig, laneById, BASE_USDC, MUSD, MUSDC } from "./config.ts";
+import { clientFor, makeClients, readBtcUsd18, readFloatState } from "./chain.ts";
 import { erc20Abi } from "./abi.ts";
 import { openDb, Store } from "./db.ts";
 import { formatMicro, grossMicro } from "./pricing.ts";
@@ -10,16 +10,22 @@ import { formatMicro, grossMicro } from "./pricing.ts";
 const cfg = loadConfig();
 const c = makeClients(cfg);
 const store = new Store(openDb(cfg.dbPath));
+const actions: string[] = [];
 
-const fs = await readFloatState(c, cfg.floatAddress);
-console.log(`Base float:        $${formatMicro(fs.balanceMicro)} USDC${fs.paused ? "  [PAUSED]" : ""}`);
-console.log(`Daily payout used: $${formatMicro(fs.globalSpentToday)} of $${formatMicro(fs.maxGlobal)}`);
+for (const lane of cfg.lanes) {
+  const fs = await readFloatState(clientFor(c, lane.dst), lane.floatAddress);
+  const token = lane.id === "exit" ? "USDC on Base" : "mUSDC on Mezo";
+  console.log(`\n== ${lane.id.toUpperCase()} lane (${lane.src} to ${lane.dst}) ==`);
+  console.log(`Float:             $${formatMicro(fs.balanceMicro)} ${token}${fs.paused ? "  [PAUSED]" : ""}`);
+  console.log(`Daily payout used: $${formatMicro(fs.globalSpentToday)} of $${formatMicro(fs.maxGlobal)}`);
+  const day = store.paidSince(24 * 3600 * 1000, lane.id);
+  console.log(`Last 24h:          ${day.count} payouts, $${formatMicro(day.payoutMicro)} paid, $${formatMicro(day.feeMicro)} fees`);
+  console.log("Queue:            ", JSON.stringify(store.counts(lane.id)));
+  if (fs.balanceMicro < lane.lowFloatMicro) actions.push(`${lane.id} float below $${formatMicro(lane.lowFloatMicro)}`);
+}
 
-const day = store.paidSince(24 * 3600 * 1000);
-console.log(`Last 24h:          ${day.count} payouts, $${formatMicro(day.payoutMicro)} paid, $${formatMicro(day.feeMicro)} fees`);
-console.log("Queue:            ", JSON.stringify(store.counts()));
-
-let treasuryMicro = 0n;
+// Treasury positions. Each direction's deposits can refill the other direction's float on the same chain.
+let exitTreasuryMicro = 0n;
 if (cfg.treasuryAddress) {
   const t = cfg.treasuryAddress;
   const [musd, musdc, btcWei] = await Promise.all([
@@ -33,17 +39,29 @@ if (cfg.treasuryAddress) {
   } catch (e) {
     console.log("BTC price unavailable:", (e as Error).message);
   }
-  const musdUsd = grossMicro("musd", musd, undefined, cfg.pricing);
-  const musdcUsd = grossMicro("musdc", musdc, undefined, cfg.pricing);
-  const btcUsd = btcUsd18 ? grossMicro("btc", btcWei, btcUsd18, cfg.pricing) : 0n;
-  treasuryMicro = musdUsd + musdcUsd + btcUsd;
-  console.log(`Mezo treasury:     MUSD ${formatUnits(musd, 18)} | mUSDC ${formatUnits(musdc, 6)} | BTC ${formatUnits(btcWei, 18)}`);
-  console.log(`Treasury value:    ~$${formatMicro(treasuryMicro)} (after peg/BTC haircuts)`);
+  exitTreasuryMicro = grossMicro("musd", musd, undefined, cfg.pricing) + grossMicro("musdc", musdc, undefined, cfg.pricing) + (btcUsd18 ? grossMicro("btc", btcWei, btcUsd18, cfg.pricing) : 0n);
+  console.log(`\nMezo treasury:     MUSD ${formatUnits(musd, 18)} | mUSDC ${formatUnits(musdc, 6)} | BTC ${formatUnits(btcWei, 18)}`);
+  console.log(`Treasury value:    ~$${formatMicro(exitTreasuryMicro)} (after peg/BTC haircuts)`);
+  const enter = laneById(cfg, "enter");
+  if (enter) {
+    const efs = await readFloatState(clientFor(c, enter.dst), enter.floatAddress);
+    if (efs.balanceMicro < enter.lowFloatMicro && musdc > 0n) {
+      console.log(`Netting:           the Mezo treasury holds ${formatUnits(musdc, 6)} mUSDC that can refill the Mezo float (no bridge needed)`);
+    }
+  }
 } else {
-  console.log("Set TREASURY_ADDRESS to include Mezo treasury balances.");
+  console.log("\nSet TREASURY_ADDRESS to include Mezo treasury balances.");
 }
 
-const reasons: string[] = [];
-if (fs.balanceMicro < cfg.lowFloatMicro) reasons.push(`float below $${formatMicro(cfg.lowFloatMicro)}`);
-if (treasuryMicro >= cfg.batchThresholdMicro) reasons.push(`treasury at or above $${formatMicro(cfg.batchThresholdMicro)}`);
-console.log(reasons.length ? `\nACTION: run a rebalancing batch (${reasons.join("; ")}). See docs/RUNBOOK.md.` : "\nNo rebalance needed.");
+if (cfg.baseTreasuryAddress) {
+  const usdc = await c.baseClient.readContract({ address: BASE_USDC, abi: erc20Abi, functionName: "balanceOf", args: [cfg.baseTreasuryAddress] });
+  console.log(`Base treasury:     ${formatUnits(usdc, 6)} USDC (collected from the enter lane)`);
+  const exit = laneById(cfg, "exit")!;
+  const xfs = await readFloatState(clientFor(c, exit.dst), exit.floatAddress);
+  if (xfs.balanceMicro < exit.lowFloatMicro && usdc > 0n) {
+    console.log("Netting:           the Base treasury USDC can refill the Base float directly (no bridge needed)");
+  }
+}
+
+if (exitTreasuryMicro >= cfg.batchThresholdMicro) actions.push(`Mezo treasury at or above $${formatMicro(cfg.batchThresholdMicro)}`);
+console.log(actions.length ? `\nACTION: ${actions.join("; ")}. See docs/RUNBOOK.md.` : "\nNo rebalance needed.");

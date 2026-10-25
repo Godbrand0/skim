@@ -1,12 +1,14 @@
 // Pure pricing and fee math. All amounts are bigint; USD values are in USDC micro-units (6 decimals).
 
-export type Asset = "musd" | "musdc" | "btc";
+export type Asset = "musd" | "musdc" | "btc" | "usdc";
 
 export interface PricingConfig {
   /** MUSD value in USD, in basis points of $1 (9900 = $0.99). Covers peg drift. */
   musdValueBps: bigint;
   /** mUSDC value in USD, in basis points of $1. */
   musdcValueBps: bigint;
+  /** USDC (deposited on Base) value in USD, in basis points of $1. */
+  usdcValueBps: bigint;
   /** Haircut applied to the BTC oracle price, in basis points. Covers BTC movement before conversion. */
   btcSpreadBps: bigint;
   /** Percentage fee, in basis points of the gross value. */
@@ -36,6 +38,8 @@ export function grossMicro(asset: Asset, amount: bigint, btcUsd18: bigint | unde
       return ((amount / 10n ** 12n) * cfg.musdValueBps) / BPS;
     case "musdc":
       return (amount * cfg.musdcValueBps) / BPS;
+    case "usdc":
+      return (amount * cfg.usdcValueBps) / BPS;
     case "btc": {
       if (btcUsd18 === undefined || btcUsd18 <= 0n) throw new Error("BTC price unavailable");
       // wei (1e18 per BTC) * price (USD*1e18 per BTC) / 1e36 = USD; * 1e6 = micro

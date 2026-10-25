@@ -4,6 +4,8 @@ export type Status = "new" | "waiting" | "sending" | "paid" | "manual_review";
 
 export interface DepositRow {
   id: string;
+  /** "exit" (Mezo to Base) or "enter" (Base to Mezo). Older rows default to "exit". */
+  lane: string;
   nonce: number;
   tx_hash: string;
   block_number: number;
@@ -49,6 +51,9 @@ export function openDb(path: string): DatabaseSync {
     CREATE INDEX IF NOT EXISTS deposits_tx ON deposits(tx_hash);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
+  // Migration: databases created before the reverse lane existed have no lane column.
+  const cols = db.prepare("PRAGMA table_info(deposits)").all() as unknown as { name: string }[];
+  if (!cols.some((c) => c.name === "lane")) db.exec("ALTER TABLE deposits ADD COLUMN lane TEXT NOT NULL DEFAULT 'exit'");
   return db;
 }
 
@@ -70,10 +75,10 @@ export class Store {
     const now = Date.now();
     const res = this.db
       .prepare(
-        `INSERT OR IGNORE INTO deposits (id, nonce, tx_hash, block_number, sender, token, asset, amount, recipient, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`,
+        `INSERT OR IGNORE INTO deposits (id, lane, nonce, tx_hash, block_number, sender, token, asset, amount, recipient, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`,
       )
-      .run(d.id, d.nonce, d.tx_hash, d.block_number, d.sender, d.token, d.asset, d.amount, d.recipient, now, now);
+      .run(d.id, d.lane, d.nonce, d.tx_hash, d.block_number, d.sender, d.token, d.asset, d.amount, d.recipient, now, now);
     return Number(res.changes) > 0;
   }
 
@@ -96,10 +101,10 @@ export class Store {
     return this.db.prepare("SELECT * FROM deposits WHERE id = ?").get(id) as unknown as DepositRow | undefined;
   }
   /** Sum of payouts sent in the last `sinceMs` milliseconds, in USDC micro. */
-  paidSince(sinceMs: number): { count: number; payoutMicro: bigint; feeMicro: bigint } {
+  paidSince(sinceMs: number, lane?: string): { count: number; payoutMicro: bigint; feeMicro: bigint } {
     const rows = this.db
-      .prepare("SELECT payout_micro, fee_micro FROM deposits WHERE status = 'paid' AND updated_at >= ?")
-      .all(Date.now() - sinceMs) as unknown as { payout_micro: string | null; fee_micro: string | null }[];
+      .prepare(`SELECT payout_micro, fee_micro FROM deposits WHERE status = 'paid' AND updated_at >= ?${lane ? " AND lane = ?" : ""}`)
+      .all(...([Date.now() - sinceMs, ...(lane ? [lane] : [])] as [number, ...string[]])) as unknown as { payout_micro: string | null; fee_micro: string | null }[];
     let payoutMicro = 0n;
     let feeMicro = 0n;
     for (const r of rows) {
@@ -108,8 +113,10 @@ export class Store {
     }
     return { count: rows.length, payoutMicro, feeMicro };
   }
-  counts(): Record<string, number> {
-    const rows = this.db.prepare("SELECT status, COUNT(*) AS n FROM deposits GROUP BY status").all() as unknown as { status: string; n: number }[];
+  counts(lane?: string): Record<string, number> {
+    const rows = (lane
+      ? this.db.prepare("SELECT status, COUNT(*) AS n FROM deposits WHERE lane = ? GROUP BY status").all(lane)
+      : this.db.prepare("SELECT status, COUNT(*) AS n FROM deposits GROUP BY status").all()) as unknown as { status: string; n: number }[];
     return Object.fromEntries(rows.map((r) => [r.status, r.n]));
   }
 }
