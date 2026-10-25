@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Mezo Float</title>
+    <title>Skim</title>
     <meta name="description" content="Withdraw small amounts of MUSD, mUSDC or sats from Mezo as USDC on Base." />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -13,7 +13,7 @@
       <div class="shell top-in">
         <div class="brand">
           <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 14c4-6 8-6 12 0s8 6 16-1v9c-8 7-12 7-16 1s-8-6-12 0z" /></svg>
-          Mezo Float
+          Skim
         </div>
         <div class="top-actions">
           <a href="/docs.html">Docs</a>
@@ -39,14 +39,14 @@
     <main class="shell main">
       <section class="hero" aria-labelledby="title">
         <h1 id="title">Withdraw small amounts from Mezo</h1>
-        <p class="lead">Below Mezo's own withdrawal minimum? Send it here and receive USDC on Base.</p>
+        <p class="lead" id="lead">Below Mezo's own withdrawal minimum? Send it here and receive USDC on Base.</p>
       </section>
 
       <section class="card bridge" aria-label="Bridge">
         <div class="route">
           <div class="panel" id="from-panel">
             <div class="panel-top">
-              <span class="chain"><i class="dot mezo"></i>From Mezo</span>
+              <span class="chain"><i class="dot mezo" id="from-dot"></i><span id="from-chain">From Mezo</span></span>
               <span id="balance" class="muted"></span>
             </div>
             <div class="panel-row">
@@ -60,14 +60,15 @@
             <p id="limits" class="hint"></p>
           </div>
 
-          <div class="link" aria-hidden="true">
-            <span class="rail"></span>
+          <div class="link">
+            <span class="rail" aria-hidden="true"></span>
             <span id="fee-line" class="fee-line"></span>
+            <button id="flip" class="flip" type="button" aria-label="Switch direction" hidden><span aria-hidden="true">⇅</span></button>
           </div>
 
           <div class="panel" id="to-panel">
             <div class="panel-top">
-              <span class="chain"><i class="dot base"></i>To Base</span>
+              <span class="chain"><i class="dot base" id="to-dot"></i><span id="to-chain">To Base</span></span>
               <span class="muted">You receive, estimated</span>
             </div>
             <div class="panel-row">
@@ -75,7 +76,7 @@
               <div id="to-select" class="select"></div>
             </div>
             <div class="panel-bottom">
-              <span class="muted">We cover the Base network fee</span>
+              <span class="muted" id="to-note">We cover the Base network fee</span>
             </div>
           </div>
         </div>
@@ -83,11 +84,11 @@
         <div class="foot">
           <div class="field">
             <div class="label-row">
-              <label for="recipient">Base address that receives the USDC</label>
+              <label for="recipient" id="recipient-label">Base address that receives the USDC</label>
               <button id="use-wallet" class="linklike" type="button" hidden>Use my wallet</button>
             </div>
             <input id="recipient" autocomplete="off" spellcheck="false" placeholder="0x…" />
-            <p class="hint">Use an address you control on Base. Transfers can't be undone.</p>
+            <p class="hint" id="recipient-hint">Use an address you control on Base. Transfers can't be undone.</p>
           </div>
 
           <details class="details">
@@ -97,7 +98,7 @@
               <div><dt>Fee</dt><dd id="q-fee">-</dd></div>
               <div class="total"><dt>You receive</dt><dd id="q-payout">-</dd></div>
               <div><dt>Arrival</dt><dd>Usually within a minute or two</dd></div>
-              <div><dt>Liquidity on Base</dt><dd id="q-liquidity">-</dd></div>
+              <div><dt id="q-liq-label">Liquidity on Base</dt><dd id="q-liquidity">-</dd></div>
             </dl>
           </details>
         </div>
@@ -116,8 +117,8 @@
       <section class="flat info" aria-labelledby="how-title">
         <h2 id="how-title">How it works</h2>
         <ol>
-          <li>You send on Mezo. The funds go straight to the Mezo Float treasury.</li>
-          <li>When your transfer confirms, USDC is paid to your Base address from a pre-funded float, minus the fee.</li>
+          <li id="how-1">You send on Mezo. The funds go straight to the Skim treasury.</li>
+          <li id="how-2">When your transfer confirms, USDC is paid to your Base address from a pre-funded float, minus the fee.</li>
           <li>The treasury settles with Mezo later in larger batches, which is how small amounts become possible.</li>
         </ol>
         <p class="hint">Beta. The contracts have not been audited, and per-transfer and daily limits apply. If liquidity runs out, your transfer waits until the float is refilled.</p>

@@ -5,6 +5,11 @@ import type { Address } from "viem";
 export const API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8787";
 
 export const MEZO_CHAIN_ID = 31612;
+export const BASE_CHAIN_ID = 8453;
+export const BASE_RPC = "https://mainnet.base.org";
+/** 0.000005 ETH on Base: several times the cost of an approval plus a deposit. Below this the UI warns. */
+export const LOW_BASE_ETH_WEI = 5n * 10n ** 12n;
+export { base as baseChain };
 export const MEZO_EXPLORER = "https://explorer.mezo.org";
 export const BASE_EXPLORER = "https://basescan.org";
 export const MEZO_RPC = "https://mainnet.mezo.public.validationcloud.io";
@@ -29,7 +34,7 @@ export const mezo = defineChain({
 
 // Read-only clients over plain HTTP, so balances show whichever network the wallet is on.
 export const mezoRead = createPublicClient({ chain: mezo, transport: http() });
-export const baseRead = createPublicClient({ chain: base, transport: http("https://mainnet.base.org") });
+export const baseRead = createPublicClient({ chain: base, transport: http(BASE_RPC) });
 
 export const erc20Abi = parseAbi([
   "function balanceOf(address) view returns (uint256)",

@@ -14,6 +14,14 @@ interface Config {
   maxPayoutUsdc: string;
   paused: boolean;
   btcUsd: string | null;
+  enter?: {
+    contracts: { deposit: string; float: string };
+    asset: Asset;
+    payoutToken: string;
+    floatAvailable: string;
+    maxPayout: string;
+    paused: boolean;
+  };
 }
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -26,6 +34,10 @@ const usd2 = (s: string): string => {
   const [w, f = ""] = s.split(".");
   return `$${Number(w).toLocaleString("en-US")}.${f.padEnd(2, "0").slice(0, 2)}`;
 };
+
+function row_(label: string, value: string): HTMLDivElement {
+  return row(label, value);
+}
 
 function row(label: string, value: string): HTMLDivElement {
   const d = document.createElement("div");
@@ -49,9 +61,19 @@ function addressCell(el: HTMLElement, address: string, explorer: string): void {
 async function loadLive(): Promise<void> {
   const status = $("live-status");
   try {
-    const r = await fetch(`${API}/api/config`);
-    if (!r.ok) throw new Error(String(r.status));
-    const cfg = (await r.json()) as Config;
+    // A sleeping host can take about a minute to wake, so retry for a while before giving up.
+    let cfg: Config | undefined;
+    for (let attempt = 0; attempt < 25 && !cfg; attempt++) {
+      try {
+        const r = await fetch(`${API}/api/config`);
+        if (!r.ok) throw new Error(String(r.status));
+        cfg = (await r.json()) as Config;
+      } catch {
+        if (attempt === 0) status.textContent = "Starting the service. This can take up to a minute…";
+        await new Promise((res) => setTimeout(res, 4000));
+      }
+    }
+    if (!cfg) throw new Error("service unavailable");
 
     const tbody = $("live-assets").querySelector("tbody");
     if (!tbody) return;
@@ -78,6 +100,26 @@ async function loadLive(): Promise<void> {
     );
     kv.hidden = false;
     status.hidden = true;
+
+    if (cfg.enter) {
+      const e = cfg.enter;
+      const row = $("live-enter-row");
+      row.replaceChildren();
+      for (const c of [`${e.asset.symbol} on Base`, `${e.payoutToken} on Mezo`, `${e.asset.min} ${e.asset.unit}`, `${e.asset.max} ${e.asset.unit}`, e.asset.enabled ? "Enabled" : "Disabled"]) {
+        const td = document.createElement("td");
+        td.textContent = c;
+        row.append(td);
+      }
+      $("live-enter-kv").replaceChildren(
+        row_("Maximum payout per transfer", `${usd2(e.maxPayout)} ${e.payoutToken}`),
+        row_("Liquidity ready on Mezo", `${usd2(e.floatAvailable)} ${e.payoutToken}`),
+        row_("Payouts", e.paused ? "Paused" : "Active"),
+      );
+      $("live-enter").hidden = false;
+      addressCell($("addr-enter-deposit"), e.contracts.deposit, BASE_EXPLORER);
+      addressCell($("addr-enter-float"), e.contracts.float, MEZO_EXPLORER);
+      document.querySelectorAll<HTMLElement>(".enter-only").forEach((r) => (r.hidden = false));
+    }
 
     $("fact-fee").textContent = `${cfg.fee.percent}%, at least ${usd2(cfg.fee.floorUsdc)}`;
     addressCell($("addr-deposit"), cfg.contracts.deposit, MEZO_EXPLORER);

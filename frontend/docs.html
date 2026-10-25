@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Mezo Float docs</title>
-    <meta name="description" content="How Mezo Float works, how to use it, and how to run and operate it." />
+    <title>Skim docs</title>
+    <meta name="description" content="How Skim works, how to use it, and how to run and operate it." />
     <link rel="stylesheet" href="/src/style.css" />
     <link rel="stylesheet" href="/src/docs.css" />
   </head>
@@ -14,7 +14,7 @@
       <div class="shell top-in">
         <a class="brand" href="/">
           <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 14c4-6 8-6 12 0s8 6 16-1v9c-8 7-12 7-16 1s-8-6-12 0z" /></svg>
-          Mezo Float
+          Skim
         </a>
         <nav class="top-nav" aria-label="Site">
           <a href="/docs.html" aria-current="page">Docs</a>
@@ -46,16 +46,17 @@
       </aside>
 
       <article class="doc">
-        <h1>Mezo Float documentation</h1>
+        <h1>Skim documentation</h1>
         <p class="lead">Withdraw small amounts of MUSD, mUSDC or sats from Mezo as USDC on Base, even when they are below Mezo's own withdrawal minimum.</p>
 
         <section id="overview">
           <h2>Overview</h2>
-          <p>Mezo's native bridge has a high minimum for dollar tokens and a fixed fee, so a balance of a few dollars cannot leave Mezo at all. Mezo Float fixes this with a pre-funded pool of USDC on Base, called the float. You send your tokens on Mezo, and the float pays you USDC on Base within a minute or two. Later, the operator moves the collected tokens out of Mezo in one large batch and refills the float. The fixed costs of the native bridge are paid once per batch instead of once per user.</p>
+          <p>Mezo's native bridge has a high minimum for dollar tokens and a fixed fee, so a balance of a few dollars cannot leave Mezo at all. Skim fixes this with a pre-funded pool of USDC on Base, called the float. You send your tokens on Mezo, and the float pays you USDC on Base within a minute or two. Later, the operator moves the collected tokens out of Mezo in one large batch and refills the float. The fixed costs of the native bridge are paid once per batch instead of once per user.</p>
+          <p>It also works the other way. Deposit USDC on Base and the same kind of float on Mezo pays you mUSDC. When both directions are running, each one helps refill the other (see <a href="#architecture">Architecture</a>).</p>
 
           <div class="facts">
             <dl>
-              <div><dt>Route</dt><dd>Mezo to Base</dd></div>
+              <div><dt>Route</dt><dd>Mezo to Base, and Base to Mezo</dd></div>
               <div><dt>You send</dt><dd>mUSDC, MUSD or BTC (counted in sats)</dd></div>
               <div><dt>You receive</dt><dd>USDC on Base, native Circle USDC</dd></div>
               <div><dt>Fee</dt><dd id="fact-fee">2%, at least $0.05</dd></div>
@@ -82,7 +83,7 @@
             <li><strong>The operator rebalances later.</strong> Collected tokens are swapped to mUSDC on Mezo, withdrawn through Mezo's native bridge to Ethereum, moved to Base with Circle's CCTP, and sent to the float. This batch step is done by the operator and is not part of your transfer.</li>
           </ol>
 
-<pre class="diagram" aria-label="Flow diagram"><code>You (Mezo)                         Mezo Float                            Base
+<pre class="diagram" aria-label="Flow diagram"><code>You (Mezo)                            Skim                               Base
   |  deposit(token, amount, recipient)   |
   |------------------------------------->|  funds forwarded to treasury
   |                                      |  Deposit(id, ...) event
@@ -91,10 +92,15 @@
   |                                      |---- release(recipient, payout, id) ---->  float pays USDC
   |                                      |
   later, in batches (operator):  treasury -> mUSDC -> Mezo bridge to Ethereum -> CCTP -> float</code></pre>
+
+          <h3>The other direction: USDC on Base to mUSDC on Mezo</h3>
+          <p>It is the same flow in reverse. You deposit USDC on Base into a deposit contract, which forwards it to a treasury on Base and records the deposit. The relayer waits for 10 Base blocks, prices it at $1.00 for 1 mUSDC, takes the same fee, and pays mUSDC to your Mezo address from a float held on Mezo. The contracts are the same two contracts, deployed the other way round, so a reference can still be paid only once.</p>
+          <p>One thing to know: Mezo network fees are paid in BTC. A wallet that arrives with only mUSDC and no BTC cannot spend it yet. A small BTC top-up on arrival is on the roadmap.</p>
         </section>
 
         <section id="using-the-bridge">
           <h2>Using the bridge</h2>
+          <p>The bridge opens in the Mezo to Base direction. Press the round switch button between the two panels to go the other way, from USDC on Base to mUSDC on Mezo. The button only appears once that direction is switched on. Everything below works the same in both directions, with the networks swapped.</p>
           <ol class="sequence">
             <li><strong>Connect your wallet.</strong> Any browser wallet that supports custom networks works. If you are on another network, the button changes to <em>Switch to Mezo</em> and adds the network for you if needed (chain ID 31612, gas token BTC).</li>
             <li><strong>Pick the token you send.</strong> The dropdown lists mUSDC, MUSD and BTC with your balances. For BTC you enter whole sats.</li>
@@ -134,6 +140,14 @@
               <tbody></tbody>
             </table>
             <dl class="kv" id="live-kv" hidden></dl>
+            <div id="live-enter" hidden>
+              <h3>Base to Mezo</h3>
+              <table>
+                <thead><tr><th>You send</th><th>You receive</th><th>Minimum</th><th>Maximum</th><th>Status</th></tr></thead>
+                <tbody><tr id="live-enter-row"></tr></tbody>
+              </table>
+              <dl class="kv" id="live-enter-kv"></dl>
+            </div>
           </div>
 
           <h3>How each asset is valued</h3>
@@ -170,7 +184,7 @@ you receive = value - fee</code></pre>
 
         <section id="trust-and-security">
           <h2>Trust and security</h2>
-          <p>Mezo Float is a custodial, relayer-based service. It is designed to keep the operator's mistakes and key compromises small, but it does not remove the need to trust the operator.</p>
+          <p>Skim is a custodial, relayer-based service. It is designed to keep the operator's mistakes and key compromises small, but it does not remove the need to trust the operator.</p>
 
           <h3>What you trust the operator for</h3>
           <ul>
@@ -214,10 +228,10 @@ you receive = value - fee</code></pre>
           <table>
             <thead><tr><th>Part</th><th>Where</th><th>Job</th></tr></thead>
             <tbody>
-              <tr><td>MezoDeposit</td><td>Mezo (chain 31612)</td><td>Accepts mUSDC, MUSD or BTC, forwards to the treasury, emits <code>Deposit</code></td></tr>
-              <tr><td>MezoFloat</td><td>Base (chain 8453)</td><td>Holds USDC and pays out through <code>release</code>, within limits</td></tr>
+              <tr><td>MezoDeposit</td><td>Mezo (chain 31612), and Base (chain 8453) for the reverse direction</td><td>Accepts deposits (mUSDC, MUSD or BTC on Mezo; USDC on Base), forwards them to the treasury, emits <code>Deposit</code></td></tr>
+              <tr><td>MezoFloat</td><td>Base (USDC), and Mezo (mUSDC) for the reverse direction</td><td>Holds the float and pays out through <code>release</code>, within limits</td></tr>
               <tr><td>Relayer</td><td>Operator's server</td><td>Watches deposits, prices them, calls <code>release</code>, serves the API</td></tr>
-              <tr><td>Treasury</td><td>Mezo, operator-controlled</td><td>Receives all deposits and funds the rebalancing batches</td></tr>
+              <tr><td>Treasuries</td><td>Mezo and Base, operator-controlled</td><td>Receive the deposits of each direction</td></tr>
               <tr><td>Rebalancer</td><td>Operator, semi-manual</td><td>Converts the treasury to USDC on Base and refills the float</td></tr>
               <tr><td>Frontend</td><td>Static site</td><td>This app and these docs</td></tr>
             </tbody>
@@ -247,6 +261,14 @@ you receive = value - fee</code></pre>
 <pre><code>BTC  --(BTC/MUSD pool)-->  MUSD  --(MUSD/mUSDC pool)-->  mUSDC
 mUSDC --(Mezo native bridge, min 20)--> USDC on Ethereum
 USDC on Ethereum --(Circle CCTP)--> USDC on Base --> float</code></pre>
+
+          <h3>How two directions refill each other</h3>
+          <p>Each direction drains one float and fills one treasury on the other chain:</p>
+          <ul>
+            <li>People leaving Mezo take USDC out of the Base float and leave mUSDC in the Mezo treasury.</li>
+            <li>People entering Mezo take mUSDC out of the Mezo float and leave USDC in the Base treasury.</li>
+          </ul>
+          <p>So the USDC piling up in the Base treasury can top up the Base float directly, and the mUSDC piling up in the Mezo treasury can top up the Mezo float directly, with no bridge involved. Only the difference between the two directions ever needs Mezo's bridge, with its minimum and its fee. The operator moves the funds by hand today.</p>
         </section>
 
         <section id="contracts">
@@ -259,6 +281,8 @@ USDC on Ethereum --(Circle CCTP)--> USDC on Base --> float</code></pre>
             <tbody>
               <tr><td>MezoDeposit</td><td>Mezo</td><td id="addr-deposit">Loading…</td></tr>
               <tr><td>MezoFloat</td><td>Base</td><td id="addr-float">Loading…</td></tr>
+              <tr class="enter-only" hidden><td>MezoDeposit (reverse direction)</td><td>Base</td><td id="addr-enter-deposit">-</td></tr>
+              <tr class="enter-only" hidden><td>MezoFloat (reverse direction)</td><td>Mezo</td><td id="addr-enter-float">-</td></tr>
             </tbody>
           </table>
           <p>Tokens used (verified on-chain):</p>
@@ -355,11 +379,17 @@ event Withdrawn(address indexed to, uint256 amount);</code></pre>
   "floatAvailableUsdc": "277.255670",
   "maxPayoutUsdc": "25.000000",
   "paused": false,
-  "btcUsd": "83727.2"
+  "btcUsd": "83727.2",
+  "enter": {                        // present only when the reverse direction is switched on
+    "chains": { "source": 8453, "destination": 31612 },
+    "contracts": { "deposit": "0x...", "float": "0x..." },
+    "asset": { "key": "usdc", "symbol": "USDC", "decimals": 6, "min": "0.5", "max": "2", "enabled": true },
+    "payoutToken": "mUSDC", "floatAvailable": "1.000000", "maxPayout": "1.000000", "paused": false
+  }
 }</code></pre>
 
-          <h3>GET /api/quote?asset=&amount=</h3>
-          <p><code>asset</code> is <code>musdc</code>, <code>musd</code> or <code>btc</code>. <code>amount</code> is a decimal in token units, or whole sats for <code>btc</code>.</p>
+          <h3>GET /api/quote?lane=&asset=&amount=</h3>
+          <p><code>lane</code> is <code>exit</code> (Mezo to Base, the default) or <code>enter</code> (Base to Mezo). <code>asset</code> is <code>musdc</code>, <code>musd</code> or <code>btc</code> for <code>exit</code>, and <code>usdc</code> for <code>enter</code>. <code>amount</code> is a decimal in token units, or whole sats for <code>btc</code>.</p>
 <pre><code>GET /api/quote?asset=musdc&amp;amount=10
 
 {
@@ -498,6 +528,12 @@ cd frontend &amp;&amp; cp .env.example .env &amp;&amp; npm install &amp;&amp; np
           <h3>Is MUSD really worth less than mUSDC here?</h3>
           <p>MUSD is valued at $0.99 by default because it trades slightly below a dollar and cannot be redeemed for dollars directly. If it moves, the operator adjusts the value.</p>
 
+          <h3>Can I go from Base to Mezo too?</h3>
+          <p>Yes, once the reverse direction is switched on: deposit USDC on Base and receive mUSDC on Mezo. The switch button between the two panels appears when it is available. The fee and the limits work the same way.</p>
+
+          <h3>I received mUSDC but have no BTC. What now?</h3>
+          <p>Mezo network fees are paid in BTC, so you need a little BTC on Mezo to move mUSDC. A top-up that delivers a small amount of BTC for gas is planned. Until then, send a small amount of BTC to your address first.</p>
+
           <h3>Is this audited?</h3>
           <p>No. It has automated tests and an end-to-end test, but no independent audit. Treat it as a beta and use amounts you are comfortable with.</p>
         </section>
@@ -511,7 +547,7 @@ cd frontend &amp;&amp; cp .env.example .env &amp;&amp; npm install &amp;&amp; np
             <li><a href="https://mezo.org/docs/users/resources/contracts-reference/" rel="noopener noreferrer">Mezo contract and token addresses</a></li>
             <li><a href="https://developers.circle.com/cctp" rel="noopener noreferrer">Circle CCTP</a></li>
           </ul>
-          <p class="hint">Mezo Float is an independent project and is not affiliated with Mezo or Circle.</p>
+          <p class="hint">Skim is an independent project and is not affiliated with Mezo or Circle.</p>
         </section>
       </article>
     </div>
