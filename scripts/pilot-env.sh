@@ -21,3 +21,7 @@ export FLOAT=0x4891b3f06C3b9AA33C6DBFa45CacD3C5922Ef17A
 # Deployed 2026-10-19 on Mezo (block 12613337)
 export DEPOSIT=0x7C7ad1bEa23Eea0189e94Ec42D20d3DA604DaDE6
 export DEPOSIT_START_BLOCK=12613337
+
+# Reverse direction (fill these in after deploying, see docs/PILOT_ENTER.md)
+# export ENTER_DEPOSIT=0x...        # MezoDeposit on Base
+# export ENTER_FLOAT=0x...          # MezoFloat (mUSDC) on Mezo
