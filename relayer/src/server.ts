@@ -107,7 +107,8 @@ export function startServer(cfg: Config, c: Clients, store: Store): http.Server 
     const origin = cfg.corsOrigin;
     try {
       if (req.method === "OPTIONS") return json(res, 204, {}, origin);
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" }, origin);
+      // HEAD is allowed so uptime monitors (which default to it) work; node drops the body itself.
+      if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "method not allowed" }, origin);
 
       const url = new URL(req.url ?? "/", "http://localhost");
       const path = url.pathname;

@@ -14,6 +14,9 @@ export const mezo = defineChain({
   blockExplorers: { default: { name: "Mezo Explorer", url: "https://explorer.mezo.org" } },
 });
 
+/** Patient RPC settings: public endpoints are slow at times, and a blip should not look like an outage. */
+const RPC_OPTIONS = { timeout: 30_000, retryCount: 4, retryDelay: 1_000 } as const;
+
 export const RELAYER_ROLE = keccak256(toBytes("RELAYER_ROLE"));
 
 export interface Clients {
@@ -28,15 +31,15 @@ export const clientFor = (c: Clients, k: ChainKey): PublicClient => (k === "mezo
 export const walletFor = (c: Clients, k: ChainKey): WalletClient | undefined => (k === "mezo" ? c.mezoWallet : c.baseWallet);
 
 export function makeClients(cfg: Config): Clients {
-  const mezoClient = createPublicClient({ chain: mezo, transport: http(cfg.mezoRpc) });
-  const baseClient = createPublicClient({ chain: base, transport: http(cfg.baseRpc) }) as unknown as PublicClient;
+  const mezoClient = createPublicClient({ chain: mezo, transport: http(cfg.mezoRpc, RPC_OPTIONS) });
+  const baseClient = createPublicClient({ chain: base, transport: http(cfg.baseRpc, RPC_OPTIONS) }) as unknown as PublicClient;
   let mezoWallet: WalletClient | undefined;
   let baseWallet: WalletClient | undefined;
   let account: Account | undefined;
   if (cfg.relayerKey) {
     account = privateKeyToAccount(cfg.relayerKey);
-    mezoWallet = createWalletClient({ account, chain: mezo, transport: http(cfg.mezoRpc) });
-    baseWallet = createWalletClient({ account, chain: base, transport: http(cfg.baseRpc) }) as unknown as WalletClient;
+    mezoWallet = createWalletClient({ account, chain: mezo, transport: http(cfg.mezoRpc, RPC_OPTIONS) });
+    baseWallet = createWalletClient({ account, chain: base, transport: http(cfg.baseRpc, RPC_OPTIONS) }) as unknown as WalletClient;
   }
   return { mezoClient, baseClient, mezoWallet, baseWallet, account };
 }
