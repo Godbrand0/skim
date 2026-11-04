@@ -22,6 +22,19 @@ export interface EnterCfg {
   floatAvailable: string;
   maxPayout: string;
   paused: boolean;
+  /** Why payouts are paused, when they are (for example the MUSD peg guard). */
+  pausedReason?: string | null;
+}
+/** Live state of the on-chain MUSD peg guard. Null/absent when the relayer runs without one. */
+export interface MusdPeg {
+  healthy: boolean;
+  /** What 1 MUSD sells for in the MUSD/mUSDC pool, in USD. */
+  poolValueUsd: string;
+  usdtPoolValueUsd: string;
+  /** MUSD's value implied by the BTC pool and the MUSD protocol's PriceFeed, in USD. */
+  protocolImpliedUsd: string;
+  guard: Address;
+  rebalancer: Address | null;
 }
 export interface AppConfig {
   contracts: { deposit: Address; float: Address };
@@ -30,6 +43,9 @@ export interface AppConfig {
   floatAvailableUsdc: string;
   paused: boolean;
   enter?: EnterCfg;
+  /** USDC on Base to MUSD on Mezo. Null when the relayer has that lane switched off. */
+  enterMusd?: EnterCfg | null;
+  musdPeg?: MusdPeg | null;
 }
 export interface QuoteResp {
   payoutToken: string;
@@ -41,7 +57,7 @@ export interface QuoteResp {
 }
 export interface DepositRow {
   id: string;
-  lane: "exit" | "enter";
+  lane: "exit" | "enter" | "musd";
   payoutToken: string;
   status: "new" | "waiting" | "sending" | "paid" | "manual_review";
   payoutUsdc: string | null;

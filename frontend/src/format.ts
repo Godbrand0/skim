@@ -39,7 +39,7 @@ export function parseAmount(a: AssetCfg, text: string): bigint | undefined {
 
 /** Display metadata for tokens. Colors are tuned to stay legible on both themes. */
 export const TOKEN_STYLE: Record<string, { label: string; glyph: string; cls: string; name: string }> = {
-  musdc: { label: "mUSDC", glyph: "$", cls: "t-usdc", name: "Mezo Circle USDC" },
+  musdc: { label: "mUSDC", glyph: "$", cls: "t-musdc", name: "Mezo Circle USDC" },
   musd: { label: "MUSD", glyph: "M", cls: "t-musd", name: "Mezo USD" },
   btc: { label: "BTC", glyph: "₿", cls: "t-btc", name: "Bitcoin (sats)" },
   usdc: { label: "USDC", glyph: "$", cls: "t-usdc", name: "USD Coin" },

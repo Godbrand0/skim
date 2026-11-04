@@ -14,6 +14,7 @@ interface Config {
   maxPayoutUsdc: string;
   paused: boolean;
   btcUsd: string | null;
+  musdPeg?: { healthy: boolean; poolValueUsd: string; usdtPoolValueUsd: string; protocolImpliedUsd: string; guard: string; rebalancer: string | null } | null;
   enter?: {
     contracts: { deposit: string; float: string };
     asset: Asset;
@@ -119,6 +120,20 @@ async function loadLive(): Promise<void> {
       addressCell($("addr-enter-deposit"), e.contracts.deposit, BASE_EXPLORER);
       addressCell($("addr-enter-float"), e.contracts.float, MEZO_EXPLORER);
       document.querySelectorAll<HTMLElement>(".enter-only").forEach((r) => (r.hidden = false));
+    }
+
+    if (cfg.musdPeg) {
+      const g = cfg.musdPeg;
+      $("live-peg").replaceChildren(
+        row_("MUSD peg check", g.healthy ? "Passing" : "Failing: MUSD deposits are paused"),
+        row_("1 MUSD sells for, MUSD/mUSDC pool", `$${Number(g.poolValueUsd).toFixed(4)}`),
+        row_("1 MUSD sells for, MUSD/mUSDT pool", `$${Number(g.usdtPoolValueUsd).toFixed(4)}`),
+        row_("MUSD implied by BTC pool and PriceFeed", `$${Number(g.protocolImpliedUsd).toFixed(4)}`),
+      );
+      $("live-peg").hidden = false;
+      addressCell($("addr-guard"), g.guard, MEZO_EXPLORER);
+      if (g.rebalancer) addressCell($("addr-rebalancer"), g.rebalancer, MEZO_EXPLORER);
+      document.querySelectorAll<HTMLElement>(".musd-only").forEach((r) => (r.hidden = false));
     }
 
     $("fact-fee").textContent = `${cfg.fee.percent}%, at least ${usd2(cfg.fee.floorUsdc)}`;

@@ -8,6 +8,8 @@ export interface SelectOption {
   name: string;
   /** Right-aligned detail, such as a balance. */
   detail?: string;
+  /** Shown but not choosable, for example a token that is not enabled yet. `detail` then says why. */
+  disabled?: boolean;
 }
 
 export interface SelectHandle {
@@ -60,6 +62,7 @@ export function createSelect(root: HTMLElement, label: string, onChange: (id: st
     sel?.focus();
   }
   function choose(id: string): void {
+    if (options.find((o) => o.id === id)?.disabled) return;
     close(true);
     if (id !== selectedId) onChange(id);
   }
@@ -112,6 +115,10 @@ export function createSelect(root: HTMLElement, label: string, onChange: (id: st
         li.setAttribute("role", "option");
         li.tabIndex = -1;
         li.setAttribute("aria-selected", String(o.id === selected));
+        if (o.disabled) {
+          li.setAttribute("aria-disabled", "true");
+          li.classList.add("is-disabled");
+        }
         const text = document.createElement("span");
         text.className = "opt-text";
         const sym = document.createElement("strong");

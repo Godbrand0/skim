@@ -1,7 +1,7 @@
 import "@fontsource-variable/bricolage-grotesque";
 import { getAddress, isAddress } from "viem";
 import type { Address, Hex } from "viem";
-import type { AppConfig, AssetCfg, AssetKey, Balances, DepositRow, QuoteResp } from "./types.ts";
+import type { AppConfig, AssetCfg, AssetKey, Balances, DepositRow, EnterCfg, QuoteResp } from "./types.ts";
 import {
   BASE_CHAIN_ID,
   BASE_EXPLORER,
@@ -28,12 +28,16 @@ import type { ChainKey } from "./wallet.ts";
 
 // ---------- direction ----------
 // "exit"  = Mezo to Base: deposit mUSDC, MUSD or sats on Mezo, receive USDC on Base.
-// "enter" = Base to Mezo: deposit USDC on Base, receive mUSDC on Mezo.
+// "enter" = Base to Mezo: deposit USDC on Base, receive mUSDC or MUSD on Mezo (two lanes, two deposit contracts).
 
 type Direction = "exit" | "enter";
 
+/** The relayer lane behind a direction: the enter direction has one lane per payout token. */
+type LaneId = "exit" | "enter" | "musd";
+
 interface DirInfo {
   id: Direction;
+  lane: LaneId;
   src: ChainKey;
   dst: ChainKey;
   srcName: string;
@@ -48,12 +52,24 @@ interface DirInfo {
   paused: boolean;
 }
 
+/** The Base to Mezo lane for the chosen payout token, falling back to whichever is switched on. */
+function enterCfg(): { lane: LaneId; cfg: EnterCfg } | undefined {
+  const c = state.config;
+  if (!c) return undefined;
+  if (state.enterTarget === "musd" && c.enterMusd) return { lane: "musd", cfg: c.enterMusd };
+  if (c.enter) return { lane: "enter", cfg: c.enter };
+  if (c.enterMusd) return { lane: "musd", cfg: c.enterMusd };
+  return undefined;
+}
+
 function dirInfo(): DirInfo | undefined {
   const cfg = state.config;
   if (!cfg) return undefined;
-  if (state.direction === "enter" && cfg.enter) {
+  const en = state.direction === "enter" ? enterCfg() : undefined;
+  if (en) {
     return {
       id: "enter",
+      lane: en.lane,
       src: "base",
       dst: "mezo",
       srcName: "Base",
@@ -61,15 +77,16 @@ function dirInfo(): DirInfo | undefined {
       srcChainId: BASE_CHAIN_ID,
       srcExplorer: BASE_EXPLORER,
       dstExplorer: MEZO_EXPLORER,
-      payoutToken: cfg.enter.payoutToken,
-      deposit: cfg.enter.contracts.deposit,
-      assets: [cfg.enter.asset],
-      liquidity: cfg.enter.floatAvailable,
-      paused: cfg.enter.paused,
+      payoutToken: en.cfg.payoutToken,
+      deposit: en.cfg.contracts.deposit,
+      assets: [en.cfg.asset],
+      liquidity: en.cfg.floatAvailable,
+      paused: en.cfg.paused,
     };
   }
   return {
     id: "exit",
+    lane: "exit",
     src: "mezo",
     dst: "base",
     srcName: "Mezo",
@@ -99,7 +116,9 @@ const emptyBalances = (): Balances => ({
 
 const state = {
   config: undefined as AppConfig | undefined,
-  direction: (location.hash === "#enter" ? "enter" : "exit") as Direction,
+  direction: (location.hash.startsWith("#enter") ? "enter" : "exit") as Direction,
+  /** Which token the enter direction pays out on Mezo. */
+  enterTarget: (location.hash === "#enter-musd" ? "musd" : "musdc") as "musdc" | "musd",
   asset: "musdc" as AssetKey,
   account: undefined as Address | undefined,
   chainId: undefined as number | undefined,
@@ -180,40 +199,74 @@ function resetForm(): void {
 // ---------- token dropdowns ----------
 
 const fromSelect = createSelect($("from-select"), "Token to send", (id) => {
-  state.asset = id as AssetKey;
+  // USDC lives on Base, so choosing it means the Base to Mezo direction; the Mezo tokens mean Mezo to Base.
+  setDirection(id === "usdc" ? "enter" : "exit", id as AssetKey);
+});
+const toSelect = createSelect($("to-select"), "Token to receive", (id) => {
+  // The receive side decides the direction too: USDC on Base is the exit; mUSDC or MUSD on Mezo is the entry.
+  if (id === "musdc-mezo") setDirection("enter", undefined, "musdc");
+  else if (id === "musd-mezo") setDirection("enter", undefined, "musd");
+  else setDirection("exit");
+});
+
+/** Switch direction (and optionally the token), then reset the form and refresh everything that depends on it. */
+function setDirection(dir: Direction, asset?: AssetKey, target?: "musdc" | "musd"): void {
+  const cfg = state.config;
+  if (target) state.enterTarget = target;
+  if (dir === "enter" && !enterCfg()) return;
+  state.direction = dir;
+  history.replaceState(null, "", dir === "enter" ? (enterCfg()?.lane === "musd" ? "#enter-musd" : "#enter") : location.pathname + location.search);
+  const d = dirInfo();
+  const wanted = asset ? d?.assets.find((a) => a.key === asset && a.enabled) : undefined;
+  const first = wanted ?? d?.assets.find((a) => a.enabled) ?? d?.assets[0];
+  if (first) state.asset = first.key;
   resetForm();
   void refreshAllowance().then(render);
+  void refreshBalances();
   renderSelects();
   render();
-});
-const toSelect = createSelect($("to-select"), "Token to receive", () => {
-  /* one destination token per direction */
-});
+}
 
 function renderSelects(): void {
+  const cfg = state.config;
   const d = dirInfo();
-  const assets = (d?.assets ?? []).filter((a) => a.enabled);
-  const opts: SelectOption[] = assets.map((a) => {
-    const st = TOKEN_STYLE[a.key];
-    const bal = balanceOf(a);
+  const opt = (key: AssetKey, a: AssetCfg | undefined, unavailable: string): SelectOption => {
+    const st = TOKEN_STYLE[key];
+    const on = !!a?.enabled;
+    const bal = a && on ? balanceOf(a) : undefined;
     return {
-      id: a.key,
+      id: key,
       glyph: st.glyph,
       cls: st.cls,
-      symbol: a.key === "btc" ? "BTC (sats)" : st.label,
+      symbol: key === "btc" ? "BTC (sats)" : st.label,
       name: st.name,
-      detail: bal !== undefined ? fmtBalance(a, bal) : undefined,
+      detail: on ? (bal !== undefined && a ? fmtBalance(a, bal) : undefined) : unavailable,
+      disabled: !on,
     };
-  });
+  };
+  // Everything you can send, from both directions, in one list: MUSD, mUSDC and USDC (and BTC when it is switched on).
+  const exitAsset = (k: AssetKey) => cfg?.assets.find((a) => a.key === k);
+  const opts: SelectOption[] = [
+    opt("musd", exitAsset("musd"), "Not enabled yet"),
+    opt("musdc", exitAsset("musdc"), "Not enabled yet"),
+    opt("usdc", (cfg?.enter ?? cfg?.enterMusd)?.asset, cfg?.enter || cfg?.enterMusd ? "Not enabled yet" : "Coming soon"),
+  ];
+  if (exitAsset("btc")?.enabled) opts.push(opt("btc", exitAsset("btc"), ""));
   fromSelect.setOptions(opts, state.asset);
 
-  if (d?.id === "enter") {
-    const m = TOKEN_STYLE.musdc;
-    toSelect.setOptions([{ id: "musdc-mezo", glyph: m.glyph, cls: m.cls, symbol: "mUSDC", name: "Mezo Circle USDC on Mezo" }], "musdc-mezo");
-  } else {
-    const u = TOKEN_STYLE.usdc;
-    toSelect.setOptions([{ id: "usdc-base", glyph: u.glyph, cls: u.cls, symbol: "USDC", name: "USD Coin on Base" }], "usdc-base");
-  }
+  const m = TOKEN_STYLE.musdc;
+  const u = TOKEN_STYLE.usdc;
+  const md = TOKEN_STYLE.musd;
+  const unavailable = (e: EnterCfg | null | undefined): { disabled: boolean; detail?: string } =>
+    !e ? { disabled: true, detail: "Coming soon" } : e.paused ? { disabled: true, detail: "Paused" } : { disabled: false };
+  toSelect.setOptions(
+    [
+      { id: "usdc-base", glyph: u.glyph, cls: u.cls, symbol: "USDC", name: "USD Coin on Base" },
+      { id: "musdc-mezo", glyph: m.glyph, cls: m.cls, symbol: "mUSDC", name: "Mezo Circle USDC on Mezo", ...unavailable(cfg?.enter) },
+      { id: "musd-mezo", glyph: md.glyph, cls: md.cls, symbol: "MUSD", name: "Mezo USD on Mezo", ...unavailable(cfg?.enterMusd) },
+    ],
+    d?.id === "enter" ? (d.lane === "musd" ? "musd-mezo" : "musdc-mezo") : "usdc-base",
+  );
 }
 
 // ---------- wallet and balances ----------
@@ -315,7 +368,7 @@ async function loadQuote(): Promise<void> {
   const a = currentAsset();
   if (!a || parseAmount(a, amountEl.value) === undefined) return render();
   const seq = ++quoteSeq;
-  const res = await fetchQuote(a.key, amountEl.value.trim(), state.direction);
+  const res = await fetchQuote(a.key, amountEl.value.trim(), dirInfo()?.lane ?? "exit");
   if (seq !== quoteSeq) return; // a newer request superseded this one
   if (res.ok) {
     state.quote = res.quote;
@@ -341,13 +394,13 @@ function render(): void {
 
   connectBtn.textContent = state.account ? short(state.account) : "Connect wallet";
   useWalletBtn.hidden = !state.account || recipientEl.value.trim().toLowerCase() === state.account.toLowerCase();
-  flipBtn.hidden = !cfg?.enter;
+  flipBtn.hidden = !enterCfg();
 
   // direction-dependent labels
   $("title").textContent = d?.id === "enter" ? "Bring small amounts onto Mezo" : "Withdraw small amounts from Mezo";
   $("lead").textContent =
     d?.id === "enter"
-      ? "Have USDC on Base? Send it here and receive mUSDC on Mezo."
+      ? `Have USDC on Base? Send it here and receive ${payout} on Mezo.`
       : "Below Mezo's own withdrawal minimum? Send it here and receive USDC on Base.";
   $("from-chain").textContent = `From ${srcName}`;
   $("to-chain").textContent = `To ${dstName}`;
@@ -356,10 +409,17 @@ function render(): void {
   $("recipient-label").textContent = `${dstName} address that receives the ${payout}`;
   $("recipient-hint").textContent = `Use an address you control on ${dstName}. Transfers can't be undone.`;
   $("to-note").textContent =
-    d?.id === "enter" ? "We cover the Mezo network fee. You'll need a little BTC on Mezo to move your mUSDC." : "We cover the Base network fee";
+    d?.id === "enter" ? `We cover the Mezo network fee. You'll need a little BTC on Mezo to move your ${payout}.` : "We cover the Base network fee";
+  $("q-route").textContent = routeText(d, a);
   $("q-liq-label").textContent = `Liquidity on ${dstName}`;
   $("how-1").textContent = `You send on ${srcName}. The funds go straight to the Skim treasury.`;
   $("how-2").textContent = `When your transfer confirms, ${payout} is paid to your ${dstName} address from a pre-funded float, minus the fee.`;
+  $("how-3").textContent =
+    d?.id === "enter"
+      ? "The treasury settles with Mezo later in larger batches, which is how small amounts become possible."
+      : cfg?.musdPeg
+        ? "The treasury turns collected MUSD into mUSDC through Mezo's own pools, only while the on-chain peg check passes, then settles with Mezo's bridge in larger batches."
+        : "The treasury settles with Mezo later in larger batches, which is how small amounts become possible.";
   flipBtn.setAttribute("aria-label", d?.id === "enter" ? "Switch to Mezo to Base" : "Switch to Base to Mezo");
 
   // from panel
@@ -367,6 +427,7 @@ function render(): void {
   $("balance").textContent = a && bal !== undefined ? `Balance ${fmtBalance(a, bal)} ${a.unit}` : "";
   $("limits").textContent = a ? `Between ${a.min} and ${a.max} ${a.unit} per transfer` : "";
   $("usd-est").textContent = q ? `≈ $${money(q.grossUsdc)}` : " ";
+  renderPeg(a, d, cfg);
 
   // to panel and details
   $("receive").textContent = q ? money(q.payoutUsdc) : "0";
@@ -392,12 +453,17 @@ function render(): void {
       " and ",
       link(`${BASE_EXPLORER}/address/${cfg.contracts.float}`, `Base float ${short(cfg.contracts.float)}`),
     ];
-    if (cfg.enter) {
+    if (cfg.musdPeg) {
+      parts.push(". MUSD: ", link(`${MEZO_EXPLORER}/address/${cfg.musdPeg.guard}`, `peg guard ${short(cfg.musdPeg.guard)}`));
+      if (cfg.musdPeg.rebalancer) parts.push(" and ", link(`${MEZO_EXPLORER}/address/${cfg.musdPeg.rebalancer}`, `rebalancer ${short(cfg.musdPeg.rebalancer)}`));
+    }
+    for (const [label, e] of [["mUSDC", cfg.enter], ["MUSD", cfg.enterMusd]] as const) {
+      if (!e) continue;
       parts.push(
-        ". Reverse direction: ",
-        link(`${BASE_EXPLORER}/address/${cfg.enter.contracts.deposit}`, `Base deposit ${short(cfg.enter.contracts.deposit)}`),
+        `. Base to Mezo (${label}): `,
+        link(`${BASE_EXPLORER}/address/${e.contracts.deposit}`, `Base deposit ${short(e.contracts.deposit)}`),
         " and ",
-        link(`${MEZO_EXPLORER}/address/${cfg.enter.contracts.float}`, `Mezo float ${short(cfg.enter.contracts.float)}`),
+        link(`${MEZO_EXPLORER}/address/${e.contracts.float}`, `Mezo float ${short(e.contracts.float)}`),
       );
     }
     $("contracts").replaceChildren(...parts);
@@ -437,6 +503,39 @@ function render(): void {
   if (state.busy) disabled = true;
   actionBtn.textContent = label;
   actionBtn.disabled = disabled;
+}
+
+/** One line describing the path the funds take, for the Route details panel. */
+function routeText(d: DirInfo | undefined, a: AssetCfg | undefined): string {
+  if (!d || !a) return "-";
+  if (d.id === "enter") {
+    return d.lane === "musd"
+      ? "USDC on Base, to the treasury; MUSD paid from the float on Mezo, sized at the MUSD/mUSDC pool's price and only while the peg check passes"
+      : "USDC on Base, to the treasury; mUSDC paid from the float on Mezo";
+  }
+  switch (a.key) {
+    case "musd":
+      return "MUSD on Mezo, to the treasury; USDC paid from the float on Base. Collected MUSD is later swapped to mUSDC in Mezo's MUSD/mUSDC pool";
+    case "musdc":
+      return "mUSDC on Mezo, to the treasury; USDC paid from the float on Base";
+    default:
+      return "BTC on Mezo, to the treasury; USDC paid from the float on Base. Priced from Mezo's oracle";
+  }
+}
+
+/** Shows the MUSD peg check next to the amount when MUSD is the asset being sent. */
+function renderPeg(a: AssetCfg | undefined, d: DirInfo | undefined, cfg: AppConfig | undefined): void {
+  const el = $("peg-note");
+  const peg = cfg?.musdPeg;
+  if (!peg || a?.key !== "musd" || d?.id !== "exit") {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.className = `hint peg ${peg.healthy ? "ok" : "bad"}`;
+  el.textContent = peg.healthy
+    ? `MUSD peg check passed: Mezo's pools pay $${Number(peg.poolValueUsd).toFixed(4)} and $${Number(peg.usdtPoolValueUsd).toFixed(4)} for 1 MUSD. You are paid at the pool price, capped at $0.99.`
+    : "MUSD is trading below its peg on Mezo's pools, so MUSD deposits are paused until it recovers.";
 }
 
 function renderWalletPanel(): void {
@@ -607,17 +706,7 @@ useWalletBtn.addEventListener("click", () => {
 });
 
 flipBtn.addEventListener("click", () => {
-  if (!state.config?.enter) return;
-  state.direction = state.direction === "exit" ? "enter" : "exit";
-  history.replaceState(null, "", state.direction === "enter" ? "#enter" : location.pathname + location.search);
-  const d = dirInfo();
-  const first = d?.assets.find((a) => a.enabled) ?? d?.assets[0];
-  if (first) state.asset = first.key;
-  resetForm();
-  void refreshAllowance().then(render);
-  void refreshBalances();
-  renderSelects();
-  render();
+  setDirection(state.direction === "exit" ? "enter" : "exit");
 });
 
 $("max").addEventListener("click", () => {
@@ -650,7 +739,7 @@ async function boot(): Promise<void> {
     state.config = await fetchConfigWithRetry(() => setMsg("Starting the service. This can take up to a minute…"));
     setMsg("");
     // a link to #enter only works when the reverse direction is switched on
-    if (state.direction === "enter" && !state.config.enter) state.direction = "exit";
+    if (state.direction === "enter" && !enterCfg()) state.direction = "exit";
     const d = dirInfo();
     const first = d?.assets.find((a) => a.enabled) ?? d?.assets[0];
     if (first) state.asset = first.key;

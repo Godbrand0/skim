@@ -32,6 +32,7 @@
             <li><a href="#how-it-works">How it works</a></li>
             <li><a href="#using-the-bridge">Using the bridge</a></li>
             <li><a href="#fees-and-limits">Assets, fees and limits</a></li>
+            <li><a href="#musd">MUSD on-chain</a></li>
             <li><a href="#trust-and-security">Trust and security</a></li>
             <li><a href="#architecture">Architecture</a></li>
             <li><a href="#contracts">Contracts</a></li>
@@ -155,7 +156,7 @@
             <thead><tr><th>Asset</th><th>Value in USD</th><th>Why</th></tr></thead>
             <tbody>
               <tr><td>mUSDC</td><td>$1.00 per token</td><td>Mezo's representation of Circle USDC.</td></tr>
-              <tr><td>MUSD</td><td>$0.99 per token by default</td><td>MUSD trades slightly below $1 and can only be redeemed for BTC collateral, not for USD, so the operator prices in a haircut.</td></tr>
+              <tr><td>MUSD</td><td>The MUSD/mUSDC pool price, capped at $0.99</td><td>MUSD trades slightly below $1 and can only be redeemed for BTC collateral, not for USD, so the operator prices in a haircut. When the on-chain peg guard is on, MUSD is valued at what Mezo's pool actually pays, never above $0.99, and deposits stop if it falls too far (see <a href="#musd">MUSD on-chain</a>).</td></tr>
               <tr><td>BTC (sats)</td><td>Mezo's BTC/USD oracle price, minus 0.5%</td><td>Covers price movement between your payout and the operator converting the BTC.</td></tr>
             </tbody>
           </table>
@@ -180,6 +181,23 @@ you receive = value - fee</code></pre>
 
           <h3>Why the limits exist</h3>
           <p>Each deposit has a minimum and maximum enforced by the deposit contract, and the float has three payout caps enforced by the float contract: a maximum per transfer, a maximum per recipient per UTC day, and a maximum for all payouts per UTC day. They keep any single mistake or compromised key small. The defaults at launch are $25 per transfer, $50 per recipient per day and $300 per day, but the operator can raise or lower them.</p>
+        </section>
+
+        <section id="musd">
+          <h2>MUSD on-chain</h2>
+          <p>MUSD is not just accepted here: the contracts read Mezo's own pools and the MUSD protocol's price feed, and act on them.</p>
+          <table>
+            <thead><tr><th>What</th><th>Mezo primitive</th><th>Enforced by</th></tr></thead>
+            <tbody>
+              <tr><td>MUSD deposits stop if MUSD loses its peg</td><td>MUSD/mUSDC and MUSD/mUSDT stable pools, and the BTC/MUSD pool checked against the MUSD protocol's <code>PriceFeed</code></td><td><code>MezoDeposit.deposit</code> reverts with <code>MusdDepegged</code> when <code>MusdPegGuard.isHealthy()</code> is false</td></tr>
+              <tr><td>Collected MUSD becomes mUSDC</td><td>MUSD/mUSDC pool <code>swap</code></td><td><code>MezoRebalancer.rebalance</code>, keeper-only, with an on-chain price floor and per-swap cap</td></tr>
+              <tr><td>Other routes the rebalancer can run</td><td>BTC to MUSD (floor from the <code>PriceFeed</code>), mUSDT to MUSD, mUSDC to MUSD, MUSD to BTC, and one-call mUSDC to BTC and BTC to mUSDC</td><td>Built and tested, <strong>not yet run on mainnet</strong></td></tr>
+            </tbody>
+          </table>
+          <p>The guard fails closed: if a pool or the price feed cannot be read, MUSD is treated as unhealthy. The rebalancer never holds funds. It pulls from the treasury straight into the pool, and the pool pays the treasury back.</p>
+          <dl class="kv" id="live-peg" hidden></dl>
+          <h3>Run on mainnet so far</h3>
+          <p>1 MUSD deposited on Mezo paid 0.94 USDC on Base, and the treasury's 1 MUSD was then sold for 0.991582 mUSDC through the rebalancer. The transaction hashes are in the repository's pilot results file.</p>
         </section>
 
         <section id="trust-and-security">
@@ -232,7 +250,9 @@ you receive = value - fee</code></pre>
               <tr><td>MezoFloat</td><td>Base (USDC), and Mezo (mUSDC) for the reverse direction</td><td>Holds the float and pays out through <code>release</code>, within limits</td></tr>
               <tr><td>Relayer</td><td>Operator's server</td><td>Watches deposits, prices them, calls <code>release</code>, serves the API</td></tr>
               <tr><td>Treasuries</td><td>Mezo and Base, operator-controlled</td><td>Receive the deposits of each direction</td></tr>
-              <tr><td>Rebalancer</td><td>Operator, semi-manual</td><td>Converts the treasury to USDC on Base and refills the float</td></tr>
+              <tr><td>MusdPegGuard</td><td>Mezo</td><td>Read-only depeg detector over Mezo's MUSD pools and the MUSD protocol's PriceFeed</td></tr>
+              <tr><td>MezoRebalancer</td><td>Mezo</td><td>Swaps treasury MUSD into mUSDC through Mezo's pool (other routes built, not yet live)</td></tr>
+              <tr><td>Bridge and refill</td><td>Operator, manual</td><td>Withdraws mUSDC through Mezo's bridge, moves it to Base with CCTP, refills the float</td></tr>
               <tr><td>Frontend</td><td>Static site</td><td>This app and these docs</td></tr>
             </tbody>
           </table>
@@ -273,7 +293,7 @@ USDC on Ethereum --(Circle CCTP)--> USDC on Base --> float</code></pre>
 
         <section id="contracts">
           <h2>Contracts</h2>
-          <p>Both contracts are small, use OpenZeppelin 5 (<code>AccessControlDefaultAdminRules</code>, <code>Pausable</code>, <code>ReentrancyGuard</code>, <code>SafeERC20</code>) and are written for Solidity 0.8.24.</p>
+          <p>The contracts are small, use OpenZeppelin 5 (<code>AccessControlDefaultAdminRules</code>, <code>Pausable</code>, <code>ReentrancyGuard</code>, <code>SafeERC20</code>) and are written for Solidity 0.8.24.</p>
 
           <h3>Addresses</h3>
           <table id="contract-table">
@@ -281,6 +301,8 @@ USDC on Ethereum --(Circle CCTP)--> USDC on Base --> float</code></pre>
             <tbody>
               <tr><td>MezoDeposit</td><td>Mezo</td><td id="addr-deposit">Loading…</td></tr>
               <tr><td>MezoFloat</td><td>Base</td><td id="addr-float">Loading…</td></tr>
+              <tr class="musd-only" hidden><td>MusdPegGuard</td><td>Mezo</td><td id="addr-guard">-</td></tr>
+              <tr class="musd-only" hidden><td>MezoRebalancer</td><td>Mezo</td><td id="addr-rebalancer">-</td></tr>
               <tr class="enter-only" hidden><td>MezoDeposit (reverse direction)</td><td>Base</td><td id="addr-enter-deposit">-</td></tr>
               <tr class="enter-only" hidden><td>MezoFloat (reverse direction)</td><td>Mezo</td><td id="addr-enter-float">-</td></tr>
             </tbody>
@@ -370,6 +392,7 @@ event Withdrawn(address indexed to, uint256 amount);</code></pre>
 <pre><code>{
   "chains": { "mezo": 31612, "base": 8453 },
   "contracts": { "deposit": "0x...", "float": "0x..." },
+  "musdPeg": { "healthy": true, "poolValueUsd": "0.9915", "usdtPoolValueUsd": "0.9979", "protocolImpliedUsd": "0.9987", "guard": "0x...", "rebalancer": "0x..." },
   "assets": [
     { "key": "musdc", "symbol": "mUSDC", "decimals": 6, "address": "0x04671C...", "unit": "mUSDC",
       "enabled": true, "min": "1", "max": "25" },

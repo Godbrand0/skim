@@ -12,7 +12,7 @@ export const LOW_BASE_ETH_WEI = 5n * 10n ** 12n;
 export { base as baseChain };
 export const MEZO_EXPLORER = "https://explorer.mezo.org";
 export const BASE_EXPLORER = "https://basescan.org";
-export const MEZO_RPC = "https://mainnet.mezo.public.validationcloud.io";
+export const MEZO_RPC = "https://rpc-http.mezo.boar.network";
 
 export const BASE_USDC: Address = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 export const MUSD_ADDR: Address = "0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186";

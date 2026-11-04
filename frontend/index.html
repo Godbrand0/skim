@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>Skim</title>
-    <meta name="description" content="Withdraw small amounts of MUSD, mUSDC or sats from Mezo as USDC on Base." />
+    <meta name="description" content="Withdraw small amounts of MUSD, mUSDC or sats from Mezo as USDC on Base. MUSD deposits are checked against Mezo's pools and the MUSD protocol's price feed." />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -58,6 +58,7 @@
               <button id="max" class="chip" type="button">Max</button>
             </div>
             <p id="limits" class="hint"></p>
+            <p id="peg-note" class="hint peg" hidden></p>
           </div>
 
           <div class="link">
@@ -97,6 +98,7 @@
               <div><dt>Value</dt><dd id="q-gross">-</dd></div>
               <div><dt>Fee</dt><dd id="q-fee">-</dd></div>
               <div class="total"><dt>You receive</dt><dd id="q-payout">-</dd></div>
+              <div><dt>Route</dt><dd id="q-route">-</dd></div>
               <div><dt>Arrival</dt><dd>Usually within a minute or two</dd></div>
               <div><dt id="q-liq-label">Liquidity on Base</dt><dd id="q-liquidity">-</dd></div>
             </dl>
@@ -119,7 +121,7 @@
         <ol>
           <li id="how-1">You send on Mezo. The funds go straight to the Skim treasury.</li>
           <li id="how-2">When your transfer confirms, USDC is paid to your Base address from a pre-funded float, minus the fee.</li>
-          <li>The treasury settles with Mezo later in larger batches, which is how small amounts become possible.</li>
+          <li id="how-3">The treasury settles with Mezo later in larger batches, which is how small amounts become possible.</li>
         </ol>
         <p class="hint">Beta. The contracts have not been audited, and per-transfer and daily limits apply. If liquidity runs out, your transfer waits until the float is refilled.</p>
         <p class="hint" id="contracts"></p>
