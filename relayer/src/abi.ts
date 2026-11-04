@@ -34,3 +34,26 @@ export const erc20Abi = parseAbi([
   "function approve(address spender, uint256 amount) returns (bool)",
   "function decimals() view returns (uint8)",
 ]);
+
+export const pegGuardAbi = parseAbi([
+  "function status() view returns (bool healthy, uint256 stableBps, uint256 usdtBps, uint256 btcBps)",
+  "function isHealthy() view returns (bool)",
+]);
+
+export const rebalancerAbi = parseAbi([
+  "function rebalance(uint8 route, uint256 amountIn, uint256 minOut) returns (uint256 received)",
+  "function routes(uint8 route) view returns (address pool, address tokenIn, address tokenOut, uint8 decimalsIn, uint8 decimalsOut, uint256 maxIn, uint256 maxSlippageBps)",
+  "function treasury() view returns (address)",
+  "function hasRole(bytes32 role, address account) view returns (bool)",
+  "event Rebalanced(address indexed keeper, uint8 indexed route, uint256 amountIn, uint256 amountOut)",
+]);
+
+export const refillerAbi = parseAbi([
+  "function refill(address float, uint256 amount)",
+  "function floats(address float) view returns (address token, uint256 maxPerCall)",
+  "function treasury() view returns (address)",
+  "function hasRole(bytes32 role, address account) view returns (bool)",
+  "event Refilled(address indexed keeper, address indexed float, address indexed token, uint256 amount)",
+]);
+
+export const poolAbi = parseAbi(["function getAmountOut(uint256 amountIn, address tokenIn) view returns (uint256)"]);

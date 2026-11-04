@@ -1,7 +1,7 @@
 // Prints float and treasury status for each lane and says whether it is time to rebalance.
 // Usage: node src/monitor.ts   (needs the same env as the relayer, except the private key)
 import { formatUnits } from "viem";
-import { loadConfig, laneById, BASE_USDC, MUSD, MUSDC } from "./config.ts";
+import { loadConfig, laneById, laneMicro, BASE_USDC, MUSD, MUSDC } from "./config.ts";
 import { clientFor, makeClients, readBtcUsd18, readFloatState } from "./chain.ts";
 import { erc20Abi } from "./abi.ts";
 import { openDb, Store } from "./db.ts";
@@ -14,14 +14,14 @@ const actions: string[] = [];
 
 for (const lane of cfg.lanes) {
   const fs = await readFloatState(clientFor(c, lane.dst), lane.floatAddress);
-  const token = lane.id === "exit" ? "USDC on Base" : "mUSDC on Mezo";
+  const token = lane.id === "exit" ? "USDC on Base" : lane.id === "musd" ? "MUSD on Mezo" : "mUSDC on Mezo";
   console.log(`\n== ${lane.id.toUpperCase()} lane (${lane.src} to ${lane.dst}) ==`);
-  console.log(`Float:             $${formatMicro(fs.balanceMicro)} ${token}${fs.paused ? "  [PAUSED]" : ""}`);
-  console.log(`Daily payout used: $${formatMicro(fs.globalSpentToday)} of $${formatMicro(fs.maxGlobal)}`);
+  console.log(`Float:             $${formatMicro(laneMicro(lane, fs.balanceMicro))} ${token}${fs.paused ? "  [PAUSED]" : ""}`);
+  console.log(`Daily payout used: $${formatMicro(laneMicro(lane, fs.globalSpentToday))} of $${formatMicro(laneMicro(lane, fs.maxGlobal))}`);
   const day = store.paidSince(24 * 3600 * 1000, lane.id);
   console.log(`Last 24h:          ${day.count} payouts, $${formatMicro(day.payoutMicro)} paid, $${formatMicro(day.feeMicro)} fees`);
   console.log("Queue:            ", JSON.stringify(store.counts(lane.id)));
-  if (fs.balanceMicro < lane.lowFloatMicro) actions.push(`${lane.id} float below $${formatMicro(lane.lowFloatMicro)}`);
+  if (laneMicro(lane, fs.balanceMicro) < lane.lowFloatMicro) actions.push(`${lane.id} float below $${formatMicro(lane.lowFloatMicro)}`);
 }
 
 // Treasury positions. Each direction's deposits can refill the other direction's float on the same chain.

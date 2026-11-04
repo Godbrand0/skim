@@ -3,16 +3,18 @@ import type { Address, Hex } from "viem";
 import { depositAbi, floatAbi } from "./abi.ts";
 import type { Store, DepositRow } from "./db.ts";
 import type { Config, Lane } from "./config.ts";
-import { BASE_USDC, MUSD, MUSDC, NATIVE, laneById } from "./config.ts";
+import { BASE_USDC, MUSD, MUSDC, NATIVE, laneById, laneMicro } from "./config.ts";
 import { clientFor, readBtcUsd18, readFloatState, walletFor } from "./chain.ts";
 import type { Clients } from "./chain.ts";
-import { quote } from "./pricing.ts";
+import { btcPayoutWei, feeMicro, grossMicro, musdForUsdMicro, quote, weiToUsdMicro } from "./pricing.ts";
 import type { Asset } from "./pricing.ts";
+import { musdPayoutBps, musdValueBps, readPeg } from "./peg.ts";
+import type { PegState } from "./peg.ts";
 
 /** Which asset a deposited token is, for a given lane. Unknown tokens go to manual review. */
 export function assetOf(token: string, lane: Lane["id"]): Asset | undefined {
   const t = token.toLowerCase();
-  if (lane === "enter") return t === BASE_USDC.toLowerCase() ? "usdc" : undefined;
+  if (lane !== "exit") return t === BASE_USDC.toLowerCase() ? "usdc" : undefined;
   if (t === MUSD.toLowerCase()) return "musd";
   if (t === MUSDC.toLowerCase()) return "musdc";
   if (t === NATIVE.toLowerCase()) return "btc";
@@ -121,7 +123,7 @@ export async function processPending(cfg: Config, c: Clients, store: Store): Pro
 
   let btcUsd18: bigint | undefined;
   let btcError: string | undefined;
-  if (rows.some((r) => r.asset === "btc")) {
+  if (rows.some((r) => r.asset === "btc" || r.lane === "gas")) {
     try {
       btcUsd18 = await readBtcUsd18(c, cfg.oracleMaxAgeSec);
     } catch (e) {
@@ -168,27 +170,41 @@ async function processOne(
     return void store.update(row.id, { status: "waiting", note: `waiting for BTC price: ${btcError}` });
   }
 
+  // MUSD, either deposited or paid out: if the on-chain peg guard reports a depeg, hold the payout. A MUSD deposit is valued
+  // at what Mezo's pool pays for it, and a MUSD payout is sized at the same price.
+  let pricing = { ...cfg.pricing, floatTargetMicro: lane.floatTargetMicro };
+  let peg: PegState | undefined;
+  if (asset === "musd" || lane.id === "musd") {
+    peg = await readPeg(c, cfg);
+    if (!peg.healthy) return void store.update(row.id, { status: "waiting", note: "MUSD is below its peg; payout held until it recovers" });
+    if (asset === "musd") pricing = { ...pricing, musdValueBps: musdValueBps(cfg.pricing.musdValueBps, peg) };
+  }
+
+  if (lane.payout === "btc") return processBtcPayout(cfg, c, store, lane, row, recipient, btcUsd18, btcError);
+
   const fs = await readFloatState(dst, lane.floatAddress);
-  const q = quote(asset, BigInt(row.amount), btcUsd18, fs.balanceMicro, { ...cfg.pricing, floatTargetMicro: lane.floatTargetMicro });
-  const amounts = { gross_micro: q.grossMicro.toString(), fee_micro: q.feeMicro.toString(), payout_micro: q.payoutMicro.toString() };
+  const q = quote(asset, BigInt(row.amount), btcUsd18, laneMicro(lane, fs.balanceMicro), pricing);
+  // What the float actually sends, in its own units: the dollar payout, or for the MUSD float that value in MUSD.
+  const payoutUnits = lane.id === "musd" && peg ? musdForUsdMicro(q.payoutMicro, musdPayoutBps(peg)) : q.payoutMicro;
+  const amounts = { gross_micro: q.grossMicro.toString(), fee_micro: q.feeMicro.toString(), payout_micro: laneMicro(lane, payoutUnits).toString() };
 
   if (q.payoutMicro < cfg.minPayoutMicro) {
     return void store.update(row.id, { ...amounts, status: "manual_review", note: "payout below minimum; refund required" });
   }
-  if (q.payoutMicro > fs.maxPerTx) {
+  if (payoutUnits > fs.maxPerTx) {
     return void store.update(row.id, { ...amounts, status: "manual_review", note: "payout above per-transaction limit" });
   }
   if (fs.paused) return void store.update(row.id, { ...amounts, status: "waiting", note: "float is paused" });
-  if (fs.balanceMicro < q.payoutMicro) return void store.update(row.id, { ...amounts, status: "waiting", note: "float balance too low" });
-  if (fs.globalSpentToday + q.payoutMicro > fs.maxGlobal) {
+  if (fs.balanceMicro < payoutUnits) return void store.update(row.id, { ...amounts, status: "waiting", note: "float balance too low" });
+  if (fs.globalSpentToday + payoutUnits > fs.maxGlobal) {
     return void store.update(row.id, { ...amounts, status: "waiting", note: "global daily limit reached" });
   }
   const addrSpent = await dst.readContract({ address: lane.floatAddress, abi: floatAbi, functionName: "addressSpentToday", args: [recipient] });
-  if (addrSpent + q.payoutMicro > fs.maxPerAddress) {
+  if (addrSpent + payoutUnits > fs.maxPerAddress) {
     return void store.update(row.id, { ...amounts, status: "waiting", note: "recipient daily limit reached" });
   }
 
-  const args = [recipient, q.payoutMicro, row.id as Hex] as const;
+  const args = [recipient, payoutUnits, row.id as Hex] as const;
   if (!cfg.enablePayouts || !wallet || !c.account) {
     // Simulation only: proves the call would succeed without sending it.
     await dst.simulateContract({ address: lane.floatAddress, abi: floatAbi, functionName: "release", args, account: c.account });
@@ -204,7 +220,61 @@ async function processOne(
   const receipt = await dst.waitForTransactionReceipt({ hash, timeout: 120_000 });
   if (receipt.status === "success") {
     store.update(row.id, { status: "paid", note: null });
-    log(`paid (${lane.id})`, row.id, q.payoutMicro.toString());
+    log(`paid (${lane.id})`, row.id, payoutUnits.toString());
+  } else {
+    const used = await dst.readContract({ address: lane.floatAddress, abi: floatAbi, functionName: "refUsed", args: [row.id as Hex] });
+    store.update(row.id, used ? { status: "paid" } : { status: "waiting", note: "release reverted; will retry" });
+  }
+}
+
+/**
+ * The gas-pack lane: USDC deposited on Base, native BTC paid on Mezo. The deposit's USD value, less the fee, is converted to BTC at
+ * the oracle price marked up by the spread. The float's balance and limits are in wei, so they are compared with the wei payout;
+ * the float's size in dollars (for the low-float surcharge) comes from the same oracle price.
+ */
+async function processBtcPayout(
+  cfg: Config,
+  c: Clients,
+  store: Store,
+  lane: Lane,
+  row: DepositRow,
+  recipient: Address,
+  btcUsd18: bigint | undefined,
+  btcError: string | undefined,
+): Promise<void> {
+  const dst = clientFor(c, lane.dst);
+  const wallet = walletFor(c, lane.dst);
+  if (btcUsd18 === undefined) return void store.update(row.id, { status: "waiting", note: `waiting for BTC price: ${btcError}` });
+
+  const fs = await readFloatState(dst, lane.floatAddress); // "Micro" fields hold wei on this float
+  const gross = grossMicro("usdc", BigInt(row.amount), undefined, cfg.pricing);
+  const { fee } = feeMicro(gross, weiToUsdMicro(fs.balanceMicro, btcUsd18), { ...cfg.pricing, floatTargetMicro: lane.floatTargetMicro });
+  const payoutMicro = gross > fee ? gross - fee : 0n;
+  const payoutWei = btcPayoutWei(payoutMicro, btcUsd18, cfg.pricing.btcSpreadBps);
+  const amounts = { gross_micro: gross.toString(), fee_micro: (fee > gross ? gross : fee).toString(), payout_micro: payoutMicro.toString() };
+
+  if (payoutMicro < cfg.minPayoutMicro) return void store.update(row.id, { ...amounts, status: "manual_review", note: "payout below minimum; refund required" });
+  if (payoutWei > fs.maxPerTx) return void store.update(row.id, { ...amounts, status: "manual_review", note: "payout above per-transaction limit" });
+  if (fs.paused) return void store.update(row.id, { ...amounts, status: "waiting", note: "float is paused" });
+  if (fs.balanceMicro < payoutWei) return void store.update(row.id, { ...amounts, status: "waiting", note: "BTC float balance too low" });
+  if (fs.globalSpentToday + payoutWei > fs.maxGlobal) return void store.update(row.id, { ...amounts, status: "waiting", note: "global daily limit reached" });
+  const addrSpent = await dst.readContract({ address: lane.floatAddress, abi: floatAbi, functionName: "addressSpentToday", args: [recipient] });
+  if (addrSpent + payoutWei > fs.maxPerAddress) return void store.update(row.id, { ...amounts, status: "waiting", note: "recipient daily limit reached" });
+
+  const args = [recipient, payoutWei, row.id as Hex] as const;
+  if (!cfg.enablePayouts || !wallet || !c.account) {
+    await dst.simulateContract({ address: lane.floatAddress, abi: floatAbi, functionName: "release", args, account: c.account });
+    return void store.update(row.id, { ...amounts, status: "waiting", note: "payouts disabled (simulation ok)" });
+  }
+  const { request } = await dst.simulateContract({ address: lane.floatAddress, abi: floatAbi, functionName: "release", args, account: c.account });
+  store.update(row.id, { ...amounts, status: "sending", note: null });
+  const hash = await wallet.writeContract(request);
+  store.update(row.id, { release_tx: hash });
+  log(`release sent (${lane.id})`, row.id, hash);
+  const receipt = await dst.waitForTransactionReceipt({ hash, timeout: 120_000 });
+  if (receipt.status === "success") {
+    store.update(row.id, { status: "paid", note: null });
+    log(`paid (${lane.id})`, row.id, payoutWei.toString(), "wei");
   } else {
     const used = await dst.readContract({ address: lane.floatAddress, abi: floatAbi, functionName: "refUsed", args: [row.id as Hex] });
     store.update(row.id, used ? { status: "paid" } : { status: "waiting", note: "release reverted; will retry" });

@@ -71,6 +71,29 @@ export function quote(
   return { grossMicro: gross, feeMicro: fee > gross ? gross : fee, payoutMicro: payout, surchargeApplied };
 }
 
+/**
+ * BTC (wei) that a USD value buys when the user pays for BTC. The oracle price is marked UP by the spread, so the user
+ * gets slightly less BTC than the mid price gives (the mirror of the haircut on BTC deposits).
+ */
+export function btcPayoutWei(usdMicro: bigint, btcUsd18: bigint, spreadBps: bigint): bigint {
+  if (btcUsd18 <= 0n) throw new Error("BTC price unavailable");
+  const price = (btcUsd18 * (BPS + spreadBps)) / BPS;
+  // micro / 1e6 = USD; wei = USD * 1e18 / (price18 / 1e18) = micro * 1e30 / price18
+  return (usdMicro * 10n ** 30n) / price;
+}
+
+/**
+ * MUSD (18 decimals) paid for a USD value when MUSD is worth `valueBps` of $1. Rounds down, so the float is never overpaid.
+ * A MUSD that sells below $1 therefore returns a little more than one MUSD per dollar, and one above $1 a little less.
+ */
+export function musdForUsdMicro(usdMicro: bigint, valueBps: bigint): bigint {
+  if (valueBps <= 0n) throw new Error("MUSD value unavailable");
+  return (usdMicro * 10n ** 12n * BPS) / valueBps;
+}
+
+/** USD value, in micro-units, of an amount of BTC (wei) at the oracle price (no spread). */
+export const weiToUsdMicro = (wei: bigint, btcUsd18: bigint): bigint => (wei * btcUsd18) / 10n ** 30n;
+
 /** 1 satoshi = 1e10 wei (native BTC on Mezo has 18 decimals). */
 export const WEI_PER_SAT = 10n ** 10n;
 export const satsToWei = (sats: bigint): bigint => sats * WEI_PER_SAT;
