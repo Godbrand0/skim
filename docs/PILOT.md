@@ -75,7 +75,7 @@ cast call $FLOAT "floatBalance()(uint256)" --rpc-url https://mainnet.base.org   
 
 ```shell
 export ADMIN=<mf-admin address> GUARDIAN=<mf-guardian address> TREASURY=<mf-admin address>
-export MEZO_RPC_URL=https://mainnet.mezo.public.validationcloud.io
+export MEZO_RPC_URL=https://rpc-http.mezo.boar.network
 forge script script/DeployDeposit.s.sol --rpc-url $MEZO_RPC_URL                    # dry run
 forge script script/DeployDeposit.s.sol --rpc-url $MEZO_RPC_URL --account mf-admin --broadcast
 ```
@@ -104,7 +104,7 @@ cd relayer && cp .env.example .env && chmod 600 .env
 Edit `.env`:
 
 ```
-MEZO_RPC_URL=https://mainnet.mezo.public.validationcloud.io
+MEZO_RPC_URL=https://rpc-http.mezo.boar.network
 BASE_RPC_URL=https://mainnet.base.org
 FLOAT_ADDRESS=<FLOAT>
 DEPOSIT_ADDRESS=<DEPOSIT>

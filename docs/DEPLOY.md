@@ -33,8 +33,8 @@ Deploy cost is about 0.00003 ETH. Verify the source on Basescan (`forge verify-c
 ## 3. Deploy MezoDeposit on Mezo
 ```shell
 export ADMIN=0x... GUARDIAN=0x... TREASURY=0x...
-forge script script/DeployDeposit.s.sol --rpc-url https://mainnet.mezo.public.validationcloud.io                      # dry run
-forge script script/DeployDeposit.s.sol --rpc-url https://mainnet.mezo.public.validationcloud.io --account deployer --broadcast
+forge script script/DeployDeposit.s.sol --rpc-url https://rpc-http.mezo.boar.network                      # dry run
+forge script script/DeployDeposit.s.sol --rpc-url https://rpc-http.mezo.boar.network --account deployer --broadcast
 ```
 Verify on Blockscout: `forge verify-contract <addr> src/MezoDeposit.sol:MezoDeposit --verifier blockscout --verifier-url https://explorer.mezo.org/api`.
 
