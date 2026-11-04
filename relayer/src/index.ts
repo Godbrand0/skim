@@ -1,9 +1,11 @@
 import { loadConfig, CHAIN_IDS } from "./config.ts";
-import { clientFor, makeClients, RELAYER_ROLE } from "./chain.ts";
-import { floatAbi } from "./abi.ts";
+import { clientFor, makeClients, KEEPER_ROLE, RELAYER_ROLE } from "./chain.ts";
+import { floatAbi, rebalancerAbi, refillerAbi } from "./abi.ts";
 import { openDb, Store } from "./db.ts";
 import { ingest, processPending, recover } from "./processor.ts";
 import { startServer } from "./server.ts";
+import { rebalanceOnce } from "./rebalance.ts";
+import { refillOnce } from "./refill.ts";
 import { retry } from "./retry.ts";
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
@@ -50,6 +52,14 @@ async function main() {
       const gas = await patient("gas check", () => clientFor(c, lane.dst).getBalance({ address: c.account!.address }));
       if (gas === 0n) log(`WARNING: the relayer has no gas on ${lane.dst}; ${lane.id}-lane payouts will fail until it is funded`);
     }
+    if (cfg.rebalancerAddress) {
+      const ok = await patient("keeper check", () => c.mezoClient.readContract({ address: cfg.rebalancerAddress!, abi: rebalancerAbi, functionName: "hasRole", args: [KEEPER_ROLE, c.account!.address] }));
+      if (!ok) throw new Error(`${c.account.address} does not hold KEEPER_ROLE on the rebalancer at ${cfg.rebalancerAddress}`);
+    }
+    if (cfg.refillerAddress) {
+      const ok = await patient("refiller keeper check", () => c.mezoClient.readContract({ address: cfg.refillerAddress!, abi: refillerAbi, functionName: "hasRole", args: [KEEPER_ROLE, c.account!.address] }));
+      if (!ok) throw new Error(`${c.account.address} does not hold KEEPER_ROLE on the refiller at ${cfg.refillerAddress}`);
+    }
     log("payouts ENABLED, relayer", c.account.address, "lanes:", cfg.lanes.map((l) => l.id).join(", "));
   } else {
     log("payouts DISABLED (simulation only). Set ENABLE_PAYOUTS=true to send. Lanes:", cfg.lanes.map((l) => l.id).join(", "));
@@ -73,6 +83,25 @@ async function main() {
   };
   await tick();
   setInterval(tick, cfg.pollMs);
+
+  if (cfg.refillerAddress && cfg.enablePayouts) log(`float refills ENABLED via ${cfg.refillerAddress}, every ${cfg.rebalanceIntervalMs / 1000}s`);
+  if ((cfg.rebalancerAddress || cfg.refillerAddress) && cfg.enablePayouts) {
+    if (cfg.rebalancerAddress) log(`MUSD rebalancing ENABLED via ${cfg.rebalancerAddress}, every ${cfg.rebalanceIntervalMs / 1000}s`);
+    let rebalancing = false;
+    setInterval(async () => {
+      if (rebalancing) return;
+      rebalancing = true;
+      try {
+        // Refill the floats first: treasury MUSD that a float needs should not be sold back into mUSDC.
+        await refillOnce(cfg, c);
+        if (cfg.rebalancerAddress) await rebalanceOnce(cfg, c);
+      } catch (e) {
+        log("rebalance error:", (e as Error).message.split("\n")[0]);
+      } finally {
+        rebalancing = false;
+      }
+    }, cfg.rebalanceIntervalMs);
+  }
 }
 
 main().catch((e) => {

@@ -17,7 +17,7 @@ services:
         value: "24"
       # chains and the live pilot contracts (all public)
       - key: MEZO_RPC_URL
-        value: https://mainnet.mezo.public.validationcloud.io
+        value: https://rpc-http.mezo.boar.network
       - key: BASE_RPC_URL
         value: https://mainnet.base.org
       - key: DEPOSIT_ADDRESS

@@ -2,7 +2,7 @@
 # Addresses only. No keys belong in this file.
 export PATH="$HOME/.foundry/bin:$PATH"
 export BASE_RPC=https://mainnet.base.org
-export MEZO_RPC_URL=https://mainnet.mezo.public.validationcloud.io
+export MEZO_RPC_URL=https://rpc-http.mezo.boar.network
 
 export ADMIN=0xf76B047Dfc022c8D106AdfbCC4f948b6Ee56cA61       # keystore: mf-sponsor (admin, deployer, test depositor)
 export GUARDIAN=0xF1E4b4C6e6d921144980d510B1213A920Bba72F1     # can only pause

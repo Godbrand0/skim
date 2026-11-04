@@ -3,11 +3,12 @@ import { formatUnits } from "viem";
 import type { Address } from "viem";
 import { depositAbi } from "./abi.ts";
 import type { Config, Lane } from "./config.ts";
-import { BASE_USDC, CHAIN_IDS, MUSD, MUSDC, NATIVE, laneById } from "./config.ts";
+import { NO_GUARD, musdPayoutBps, musdValueBps, readPeg } from "./peg.ts";
+import { BASE_USDC, CHAIN_IDS, MUSD, MUSDC, NATIVE, laneById, laneMicro } from "./config.ts";
 import { clientFor, readBtcUsd18, readFloatState } from "./chain.ts";
 import type { Clients } from "./chain.ts";
 import type { Store, DepositRow } from "./db.ts";
-import { formatMicro, parseDecimal, quote, satsToWei, weiToSats } from "./pricing.ts";
+import { btcPayoutWei, feeMicro, formatMicro, grossMicro, musdForUsdMicro, parseDecimal, quote, satsToWei, weiToSats, weiToUsdMicro } from "./pricing.ts";
 import type { Asset } from "./pricing.ts";
 import { metaKey } from "./processor.ts";
 import { clientIp } from "./clientIp.ts";
@@ -28,7 +29,7 @@ const EXIT_ASSETS: AssetInfo[] = [
 const ENTER_ASSETS: AssetInfo[] = [{ key: "usdc", symbol: "USDC", decimals: 6, address: BASE_USDC, unit: "USDC" }];
 const assetsFor = (lane: Lane): AssetInfo[] => (lane.id === "exit" ? EXIT_ASSETS : ENTER_ASSETS);
 /** What the user receives on each lane. */
-const PAYOUT_TOKEN: Record<Lane["id"], string> = { exit: "USDC", enter: "mUSDC" };
+const PAYOUT_TOKEN: Record<Lane["id"], string> = { exit: "USDC", enter: "mUSDC", musd: "MUSD", gas: "BTC" };
 
 const TX_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -122,13 +123,14 @@ export function startServer(cfg: Config, c: Clients, store: Store): http.Server 
       if (limited(clientIp(req.headers, req.socket.remoteAddress, cfg.trustProxy))) return json(res, 429, { error: "rate limited" }, origin);
       const exit = laneById(cfg, "exit")!;
       const enter = laneById(cfg, "enter");
+      const gas = laneById(cfg, "gas");
 
       if (path === "/api/health") {
         const lanes: Record<string, unknown> = {};
         for (const lane of cfg.lanes) {
           const fs = await floatOf(lane);
           lanes[lane.id] = {
-            floatBalance: formatMicro(fs.balanceMicro),
+            floatBalance: formatMicro(laneMicro(lane, fs.balanceMicro)),
             floatPaused: fs.paused,
             sourceHead: store.getMeta(metaKey(lane, "head_block")) ?? null,
             lastProcessedBlock: store.getMeta(metaKey(lane, "last_block")) ?? null,
@@ -158,20 +160,39 @@ export function startServer(cfg: Config, c: Clients, store: Store): http.Server 
       }
 
       if (path === "/api/config") {
-        const [tc, fs, price] = await Promise.all([tokenConfigs(exit), floatOf(exit), btcPrice()]);
-        let enterCfg: unknown;
-        if (enter) {
-          const [etc, efs] = await Promise.all([tokenConfigs(enter), floatOf(enter)]);
+        const [tc, fs, price, peg] = await Promise.all([tokenConfigs(exit), floatOf(exit), btcPrice(), readPeg(c, cfg)]);
+        // The Base to Mezo lanes that pay a token (mUSDC, or MUSD) share one shape.
+        const tokenEnterCfg = async (lane: Lane, paused?: string) => {
+          const [etc, efs] = await Promise.all([tokenConfigs(lane), floatOf(lane)]);
           const a = ENTER_ASSETS[0];
           const t = etc[a.key];
-          enterCfg = {
+          return {
             chains: { source: CHAIN_IDS.base, destination: CHAIN_IDS.mezo },
-            contracts: { deposit: enter.depositAddress, float: enter.floatAddress },
+            contracts: { deposit: lane.depositAddress, float: lane.floatAddress },
             asset: { key: a.key, symbol: a.symbol, decimals: a.decimals, address: a.address, unit: a.unit, enabled: t.enabled, min: formatUnits(t.min, a.decimals), max: formatUnits(t.max, a.decimals) },
-            payoutToken: PAYOUT_TOKEN.enter,
-            floatAvailable: formatMicro(efs.balanceMicro),
-            maxPayout: formatMicro(efs.maxPerTx),
-            paused: efs.paused,
+            payoutToken: PAYOUT_TOKEN[lane.id],
+            floatAvailable: formatMicro(laneMicro(lane, efs.balanceMicro)),
+            maxPayout: formatMicro(laneMicro(lane, efs.maxPerTx)),
+            paused: efs.paused || (paused !== undefined),
+            pausedReason: efs.paused ? "Payouts are paused." : paused ?? null,
+          };
+        };
+        const enterCfg = enter ? await tokenEnterCfg(enter) : undefined;
+        const enterMusd = laneById(cfg, "musd");
+        const enterMusdCfg = enterMusd ? await tokenEnterCfg(enterMusd, peg.healthy ? undefined : "MUSD is trading below its peg right now, so MUSD payouts are paused.") : undefined;
+        let gasCfg: unknown;
+        if (gas) {
+          const [gtc, gfs] = await Promise.all([tokenConfigs(gas), floatOf(gas)]);
+          const a = ENTER_ASSETS[0];
+          const t = gtc[a.key];
+          gasCfg = {
+            chains: { source: CHAIN_IDS.base, destination: CHAIN_IDS.mezo },
+            contracts: { deposit: gas.depositAddress, float: gas.floatAddress },
+            asset: { key: a.key, symbol: a.symbol, decimals: a.decimals, address: a.address, unit: a.unit, enabled: t.enabled, min: formatUnits(t.min, a.decimals), max: formatUnits(t.max, a.decimals) },
+            payoutToken: "BTC",
+            floatAvailableSats: weiToSats(gfs.balanceMicro).toString(), // this float's "micro" fields are wei
+            maxPayoutSats: weiToSats(gfs.maxPerTx).toString(),
+            paused: gfs.paused,
           };
         }
         return json(res, 200, {
@@ -180,14 +201,20 @@ export function startServer(cfg: Config, c: Clients, store: Store): http.Server 
           assets: EXIT_ASSETS.map((a) => {
             const t = tc[a.key];
             const toUnit = (v: bigint) => (a.key === "btc" ? weiToSats(v).toString() : formatUnits(v, a.decimals));
-            return { key: a.key, symbol: a.symbol, decimals: a.decimals, address: a.address, unit: a.unit, enabled: t.enabled, min: toUnit(t.min), max: toUnit(t.max) };
+            const enabled = a.key === "musd" && !peg.healthy ? false : t.enabled;
+            return { key: a.key, symbol: a.symbol, decimals: a.decimals, address: a.address, unit: a.unit, enabled, min: toUnit(t.min), max: toUnit(t.max) };
           }),
           fee: { percent: Number(cfg.pricing.feeBps) / 100, floorUsdc: formatMicro(cfg.pricing.feeFloorMicro) },
           floatAvailableUsdc: formatMicro(fs.balanceMicro),
           maxPayoutUsdc: formatMicro(fs.maxPerTx),
           paused: fs.paused,
           btcUsd: price.value !== undefined ? formatUnits(price.value, 18) : null,
+          musdPeg: peg.configured
+            ? { healthy: peg.healthy, poolValueUsd: (Number(peg.stableBps) / 10000).toFixed(4), usdtPoolValueUsd: (Number(peg.usdtBps) / 10000).toFixed(4), protocolImpliedUsd: (Number(peg.btcBps) / 10000).toFixed(4), guard: cfg.pegGuardAddress, rebalancer: cfg.rebalancerAddress ?? null }
+            : null,
           enter: enterCfg,
+          enterMusd: enterMusdCfg ?? null,
+          gas: gasCfg ?? null,
         }, origin);
       }
 
@@ -207,7 +234,42 @@ export function startServer(cfg: Config, c: Clients, store: Store): http.Server 
           return json(res, 400, { error: "invalid amount" }, origin);
         }
 
-        const [tc, fs, price] = await Promise.all([tokenConfigs(lane), floatOf(lane), info.key === "btc" ? btcPrice() : Promise.resolve({} as { value?: bigint })]);
+        if (lane.payout === "btc") {
+          const [tc, fs, price] = await Promise.all([tokenConfigs(lane), floatOf(lane), btcPrice()]);
+          const t = tc[info.key];
+          const reasons: string[] = [];
+          if (!t.enabled) reasons.push("This asset is not enabled right now.");
+          if (amount < t.min) reasons.push("Amount is below the minimum.");
+          if (amount > t.max) reasons.push("Amount is above the maximum.");
+          if (price.value === undefined) {
+            reasons.push("BTC price is temporarily unavailable.");
+            return json(res, 200, { lane: lane.id, asset: info.key, canFulfill: false, reasons, payoutToken: "BTC" }, origin);
+          }
+          const gross = grossMicro("usdc", amount, undefined, cfg.pricing);
+          const { fee, surchargeApplied } = feeMicro(gross, weiToUsdMicro(fs.balanceMicro, price.value), { ...cfg.pricing, floatTargetMicro: lane.floatTargetMicro });
+          const payoutMicro = gross > fee ? gross - fee : 0n;
+          const payoutWei = btcPayoutWei(payoutMicro, price.value, cfg.pricing.btcSpreadBps);
+          if (payoutMicro < cfg.minPayoutMicro) reasons.push("Amount is too small after fees.");
+          if (payoutWei > fs.maxPerTx) reasons.push("Amount is above the per-payout limit.");
+          if (fs.paused) reasons.push("Payouts are paused.");
+          if (payoutWei > fs.balanceMicro) reasons.push("Not enough BTC liquidity right now. Try a smaller amount later.");
+          return json(res, 200, {
+            lane: lane.id,
+            asset: info.key,
+            grossUsdc: formatMicro(gross),
+            feeUsdc: formatMicro(fee > gross ? gross : fee),
+            payoutUsdValue: formatMicro(payoutMicro),
+            payoutSats: weiToSats(payoutWei).toString(),
+            payoutToken: "BTC",
+            btcUsd: formatUnits(price.value, 18),
+            surchargeApplied,
+            canFulfill: reasons.length === 0,
+            reasons,
+            note: "Estimate. The final amount is set when your deposit is confirmed.",
+          }, origin);
+        }
+
+        const [tc, fs, price, peg] = await Promise.all([tokenConfigs(lane), floatOf(lane), info.key === "btc" ? btcPrice() : Promise.resolve({} as { value?: bigint }), info.key === "musd" || lane.id === "musd" ? readPeg(c, cfg) : Promise.resolve(NO_GUARD)]);
         const t = tc[info.key];
         const reasons: string[] = [];
         if (!t.enabled) reasons.push("This asset is not enabled right now.");
@@ -215,18 +277,22 @@ export function startServer(cfg: Config, c: Clients, store: Store): http.Server 
         if (amount > t.max) reasons.push("Amount is above the maximum.");
         if (info.key === "btc" && price.value === undefined) reasons.push("BTC price is temporarily unavailable.");
 
-        const q = quote(info.key, amount, price.value, fs.balanceMicro, { ...cfg.pricing, floatTargetMicro: lane.floatTargetMicro });
+        if (!peg.healthy) reasons.push(lane.id === "musd" ? "MUSD is trading below its peg right now, so MUSD payouts are paused." : "MUSD is trading below its peg right now, so MUSD deposits are paused.");
+        const pricing = { ...cfg.pricing, floatTargetMicro: lane.floatTargetMicro, musdValueBps: musdValueBps(cfg.pricing.musdValueBps, peg) };
+        const q = quote(info.key, amount, price.value, laneMicro(lane, fs.balanceMicro), pricing);
+        // What the float sends, in its own units: for the MUSD float, the dollar payout sized in MUSD at the pool's price.
+        const payoutUnits = lane.id === "musd" ? musdForUsdMicro(q.payoutMicro, musdPayoutBps(peg)) : q.payoutMicro;
         if (q.payoutMicro < cfg.minPayoutMicro) reasons.push("Amount is too small after fees.");
-        if (q.payoutMicro > fs.maxPerTx) reasons.push("Amount is above the per-payout limit.");
+        if (payoutUnits > fs.maxPerTx) reasons.push("Amount is above the per-payout limit.");
         if (fs.paused) reasons.push("Payouts are paused.");
-        if (q.payoutMicro > fs.balanceMicro) reasons.push("Not enough liquidity right now. Try a smaller amount later.");
+        if (payoutUnits > fs.balanceMicro) reasons.push("Not enough liquidity right now. Try a smaller amount later.");
 
         return json(res, 200, {
           lane: lane.id,
           asset: info.key,
           grossUsdc: formatMicro(q.grossMicro),
           feeUsdc: formatMicro(q.feeMicro),
-          payoutUsdc: formatMicro(q.payoutMicro),
+          payoutUsdc: formatMicro(laneMicro(lane, payoutUnits)),
           payoutToken: PAYOUT_TOKEN[lane.id],
           surchargeApplied: q.surchargeApplied,
           canFulfill: reasons.length === 0,

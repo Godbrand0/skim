@@ -9,6 +9,11 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+interface IMusdPegGuard {
+    function musd() external view returns (address);
+    function isHealthy() external view returns (bool);
+}
+
 /// @title MezoDeposit
 /// @notice Mezo-side entry point. A user deposits MUSD, mUSDC or native BTC and names a Base
 ///         address. Funds are forwarded straight to the treasury (this contract never holds them)
@@ -37,6 +42,10 @@ contract MezoDeposit is AccessControlDefaultAdminRules, Pausable, ReentrancyGuar
 
     mapping(address token => TokenConfig) public tokenConfig;
 
+    /// @notice Optional depeg detector. While set, MUSD deposits are refused whenever it reports
+    ///         MUSD unhealthy. Zero disables the check.
+    IMusdPegGuard public pegGuard;
+
     event Deposit(
         uint256 indexed nonce,
         bytes32 indexed id,
@@ -47,6 +56,7 @@ contract MezoDeposit is AccessControlDefaultAdminRules, Pausable, ReentrancyGuar
     );
     event TokenConfigured(address indexed token, bool enabled, uint256 minAmount, uint256 maxAmount);
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+    event PegGuardUpdated(address indexed oldGuard, address indexed newGuard);
 
     error ZeroAddress();
     error InvalidTreasury();
@@ -57,6 +67,7 @@ contract MezoDeposit is AccessControlDefaultAdminRules, Pausable, ReentrancyGuar
     error TransferShortfall(uint256 expected, uint256 received);
     error NativeTransferFailed();
     error NativeKeyNotAllowed();
+    error MusdDepegged();
 
     constructor(address admin, uint48 adminTransferDelay, address guardian, address treasury_)
         AccessControlDefaultAdminRules(adminTransferDelay, admin)
@@ -82,6 +93,7 @@ contract MezoDeposit is AccessControlDefaultAdminRules, Pausable, ReentrancyGuar
     {
         if (token == NATIVE) revert NativeKeyNotAllowed();
         _validate(token, amount, recipient);
+        _checkPeg(token);
 
         IERC20 erc20 = IERC20(token);
         uint256 balanceBefore = erc20.balanceOf(treasury);
@@ -121,6 +133,12 @@ contract MezoDeposit is AccessControlDefaultAdminRules, Pausable, ReentrancyGuar
         _setTreasury(newTreasury);
     }
 
+    /// @notice Set the MUSD depeg detector, or zero to switch the check off.
+    function setPegGuard(address newGuard) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        emit PegGuardUpdated(address(pegGuard), newGuard);
+        pegGuard = IMusdPegGuard(newGuard);
+    }
+
     /// @notice Stop new deposits. Callable by the guardian or the admin.
     function pause() external {
         if (!hasRole(GUARDIAN_ROLE, msg.sender) && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
@@ -145,6 +163,11 @@ contract MezoDeposit is AccessControlDefaultAdminRules, Pausable, ReentrancyGuar
         if (amount < cfg.minAmount || amount > cfg.maxAmount) {
             revert AmountOutOfRange(amount, cfg.minAmount, cfg.maxAmount);
         }
+    }
+
+    function _checkPeg(address token) private view {
+        IMusdPegGuard g = pegGuard;
+        if (address(g) != address(0) && token == g.musd() && !g.isHealthy()) revert MusdDepegged();
     }
 
     function _record(address token, uint256 amount, address recipient) private returns (bytes32 id) {

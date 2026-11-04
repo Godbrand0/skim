@@ -95,3 +95,25 @@ test("USDC deposited on Base is valued 1:1 and pays the same fee", () => {
   assert.equal(q.feeMicro, 50_000n); // 2% is $0.02, so the $0.05 floor applies
   assert.equal(q.payoutMicro, 950_000n);
 });
+
+import { btcPayoutWei, weiToUsdMicro } from "../src/pricing.ts";
+
+test("BTC payout: $10 at $77,500 with a 0.5% spread buys slightly less than the mid price", () => {
+  const price = 77_500n * 10n ** 18n;
+  const mid = btcPayoutWei(10_000_000n, price, 0n);
+  assert.equal(mid, 129_032_258_064_516n); // 10 / 77,500 BTC, in wei (rounded down)
+  const withSpread = btcPayoutWei(10_000_000n, price, 50n);
+  assert.ok(withSpread < mid);
+  assert.equal(withSpread, (10_000_000n * 10n ** 30n) / ((price * 10_050n) / 10_000n));
+});
+
+test("BTC payout and USD value round-trip within the spread", () => {
+  const price = 80_000n * 10n ** 18n;
+  const wei = btcPayoutWei(5_000_000n, price, 50n);
+  const back = weiToUsdMicro(wei, price);
+  assert.ok(back <= 5_000_000n && back >= 4_970_000n);
+});
+
+test("BTC payout refuses a missing price", () => {
+  assert.throws(() => btcPayoutWei(1n, 0n, 50n));
+});

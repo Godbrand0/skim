@@ -10,7 +10,7 @@ export const mezo = defineChain({
   id: 31612,
   name: "Mezo",
   nativeCurrency: { name: "Bitcoin", symbol: "BTC", decimals: 18 },
-  rpcUrls: { default: { http: ["https://mainnet.mezo.public.validationcloud.io"] } },
+  rpcUrls: { default: { http: ["https://rpc-http.mezo.boar.network"] } },
   blockExplorers: { default: { name: "Mezo Explorer", url: "https://explorer.mezo.org" } },
 });
 
@@ -18,6 +18,7 @@ export const mezo = defineChain({
 const RPC_OPTIONS = { timeout: 30_000, retryCount: 4, retryDelay: 1_000 } as const;
 
 export const RELAYER_ROLE = keccak256(toBytes("RELAYER_ROLE"));
+export const KEEPER_ROLE = keccak256(toBytes("KEEPER_ROLE"));
 
 export interface Clients {
   mezoClient: PublicClient;

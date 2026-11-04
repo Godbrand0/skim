@@ -9,7 +9,7 @@ export async function fetchConfig(): Promise<AppConfig> {
 
 export type QuoteResult = { ok: true; quote: QuoteResp } | { ok: false; error: string };
 
-export async function fetchQuote(asset: AssetKey, amount: string, lane: "exit" | "enter" = "exit"): Promise<QuoteResult> {
+export async function fetchQuote(asset: AssetKey, amount: string, lane: "exit" | "enter" | "musd" = "exit"): Promise<QuoteResult> {
   try {
     const r = await fetch(`${API}/api/quote?lane=${lane}&asset=${asset}&amount=${encodeURIComponent(amount)}`);
     const body = (await r.json()) as QuoteResp & { error?: string };
